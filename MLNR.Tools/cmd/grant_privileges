@@ -1,0 +1,37 @@
+#!/bin/bash
+# mlnr 特权命令授权公共脚本（被 install_callback / upgrade_callback source 调用）
+# 作用：
+#   1) 写入 /etc/sudoers.d/mlnr NOPASSWD 白名单 —— 后端 disk.go 的 privRun()
+#      在非 root 运行时会自动通过 `sudo -n` 调用 mount/umount/hdparm，无需交互；
+#   2) smartctl / nvme 加 setuid —— 温度采集只读命令，非 root 运行时也能读取磁盘温度。
+
+APP_USER="${TRIM_USERNAME:-mlnr}"
+SUDOERS_FILE="/etc/sudoers.d/mlnr"
+
+# ---- 1) sudoers NOPASSWD 白名单 ----
+# 路径覆盖 server/syscmd.go findTool 的全部候选（/usr/bin /bin /usr/sbin /sbin /usr/local/bin）
+cat > "${SUDOERS_FILE}" <<EOF
+# mlnr: allow app user to run privileged disk commands without password
+${APP_USER} ALL=(root) NOPASSWD: /bin/mount, /usr/bin/mount, /sbin/umount, /usr/bin/umount, /sbin/hdparm, /usr/sbin/hdparm
+EOF
+chown root:root "${SUDOERS_FILE}"
+chmod 0440 "${SUDOERS_FILE}"
+
+# 校验 sudoers 语法；失败则回退移除（避免损坏系统 sudo 配置）
+if command -v visudo >/dev/null 2>&1; then
+    if ! visudo -c -f "${SUDOERS_FILE}" >/dev/null 2>&1; then
+        rm -f "${SUDOERS_FILE}"
+        echo "mlnr: sudoers config invalid, removed ${SUDOERS_FILE}" >> "${TRIM_TEMP_LOGFILE:-/dev/null}"
+    fi
+fi
+
+# ---- 2) smartctl / nvme setuid（温度采集） ----
+for b in smartctl nvme; do
+    for p in /usr/sbin/${b} /usr/bin/${b} /sbin/${b} /bin/${b}; do
+        if [ -x "${p}" ]; then
+            chmod u+s "${p}" 2>/dev/null
+        fi
+    done
+done
+
+exit 0

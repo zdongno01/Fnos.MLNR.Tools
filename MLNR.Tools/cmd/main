@@ -1,0 +1,121 @@
+#!/bin/bash
+
+# mlnr 视频转码客户端 - 生命周期脚本
+# 启动 Go 常驻服务，监听统一网关 Unix Socket
+
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+APPDEST="${TRIM_APPDEST}"
+BIN="${APPDEST}/mlnr"
+SOCK="${APPDEST}/app.sock"
+
+log_msg() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"
+}
+
+check_process() {
+    local pid=$1
+    if kill -0 "${pid}" 2>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+running() {
+    if [ -f "${PID_FILE}" ]; then
+        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        if check_process "${pid}"; then
+            return 0
+        else
+            rm -f "${PID_FILE}"
+        fi
+    fi
+    return 1
+}
+
+start_process() {
+    if running; then
+        log_msg "Already running, skip start."
+        return 0
+    fi
+
+    if [ ! -x "${BIN}" ]; then
+        log_msg "Binary not found or not executable: ${BIN}"
+        return 1
+    fi
+
+    # 清理可能残留的 socket 文件
+    rm -f "${SOCK}"
+
+    # 将当前授权目录写入文件，供运行时动态读取（config_callback 也会更新此文件）
+    if [ -n "${TRIM_PKGVAR}" ] && [ -d "${TRIM_PKGVAR}" ]; then
+        printf '%s' "${TRIM_DATA_ACCESSIBLE_PATHS}" > "${TRIM_PKGVAR}/accessible_paths.env"
+    fi
+
+    log_msg "Starting mlnr service ... (run-user=$(id -un), TRIM_RUN_USERNAME=${TRIM_RUN_USERNAME:-unset})"
+    cd "${APPDEST}"
+    mlnr_SOCK="${SOCK}" \
+    mlnr_UIDIR="${APPDEST}/ui" \
+    mlnr_DATADIR="${TRIM_PKGVAR}" \
+    TRIM_DATA_ACCESSIBLE_PATHS="${TRIM_DATA_ACCESSIBLE_PATHS}" \
+        "${BIN}" >> "${LOG_FILE}" 2>&1 &
+    printf "%s" "$!" > "${PID_FILE}"
+    log_msg "Started, pid=$!"
+    return 0
+}
+
+stop_process() {
+    log_msg "Stopping mlnr service ..."
+
+    if [ -r "${PID_FILE}" ]; then
+        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        log_msg "pid=${pid}"
+
+        if ! check_process "${pid}"; then
+            rm -f "${PID_FILE}"
+            log_msg "Process not exist, remove pid file."
+            return 0
+        fi
+
+        log_msg "send TERM signal to PID:${pid}..."
+        kill -TERM "${pid}" >> "${LOG_FILE}" 2>&1
+
+        local count=0
+        while check_process "${pid}" && [ $count -lt 10 ]; do
+            sleep 1
+            count=$((count + 1))
+            log_msg "waiting process terminate... (${count}s/10s)"
+        done
+
+        if check_process "${pid}"; then
+            log_msg "send KILL signal to PID:${pid}..."
+            kill -KILL "${pid}"
+            sleep 1
+        fi
+
+        rm -f "${PID_FILE}"
+        rm -f "${SOCK}"
+        log_msg "process stopped."
+    fi
+    return 0
+}
+
+case $1 in
+start)
+    start_process
+    ;;
+stop)
+    stop_process
+    ;;
+status)
+    if running; then
+        exit 0
+    else
+        exit 3
+    fi
+    ;;
+*)
+    exit 1
+    ;;
+esac

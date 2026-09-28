@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "execScripts": [
+    {
+      "id": 1,
+      "name": "发送 ntfy 通知",
+      "scriptType": "shell",
+      "args": "-t 'MLNR 事件'",
+      "createdAt": "2026-09-01T09:00:00+08:00",
+      "updatedAt": "2026-09-18T10:00:00+08:00"
+    },
+    {
+      "id": 2,
+      "name": "数据同步 (sync)",
+      "scriptType": "shell",
+      "args": "",
+      "createdAt": "2026-09-01T09:00:00+08:00",
+      "updatedAt": "2026-09-18T10:00:00+08:00"
+    },
+    {
+      "id": 3,
+      "name": "启动 rsync 备份",
+      "scriptType": "shell",
+      "args": "-a /vol1/1000/media /vol1/2000/backup",
+      "createdAt": "2026-09-01T09:00:00+08:00",
+      "updatedAt": "2026-09-18T10:00:00+08:00"
+    }
+  ]
+}

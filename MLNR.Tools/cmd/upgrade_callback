@@ -1,0 +1,8 @@
+#!/bin/bash
+
+### This script is called after the user upgrades the application.
+
+# 覆盖安装（升级）同样执行特权命令授权，确保 sudoers 白名单存在
+source "$(dirname "$0")/grant_privileges"
+
+exit 0

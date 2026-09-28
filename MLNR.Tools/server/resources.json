@@ -1,0 +1,207 @@
+{
+  "version": 1,
+  "schedules": [
+    {
+      "id": 1,
+      "category": "fan",
+      "name": "工作日 10:00 切静音曲线",
+      "description": "周一到周五 10:00 把机箱风扇切换为静音曲线，降低噪音。",
+      "enabled": true,
+      "scheduleType": "trigger",
+      "createdAt": "2026-09-01T09:00:00+08:00",
+      "updatedAt": "2026-09-25T18:00:00+08:00",
+      "triggers": [
+        {
+          "type": "time",
+          "period": "weekly",
+          "time": "10:00",
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "executors": [
+        {
+          "type": "fan_control",
+          "fanId": 1,
+          "fanCurve": "quiet"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "category": "disk",
+      "name": "每天 03:00 影音库下线",
+      "description": "夜间自动安全下线影音库（SW1），省电并减少机械盘磨损。",
+      "enabled": true,
+      "scheduleType": "trigger",
+      "createdAt": "2026-09-01T09:00:00+08:00",
+      "updatedAt": "2026-09-25T18:00:00+08:00",
+      "triggers": [
+        {
+          "type": "time",
+          "period": "daily",
+          "time": "03:00"
+        }
+      ],
+      "executors": [
+        {
+          "type": "disk_group_control",
+          "diskGroupId": 1,
+          "diskAction": "offline"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "category": "disk",
+      "name": "每天 08:00 影音库上线",
+      "description": "早上自动上线影音库（SW1），随后自动挂载分区。",
+      "enabled": true,
+      "scheduleType": "trigger",
+      "createdAt": "2026-09-01T09:00:00+08:00",
+      "updatedAt": "2026-09-25T18:00:00+08:00",
+      "triggers": [
+        {
+          "type": "time",
+          "period": "daily",
+          "time": "08:00"
+        }
+      ],
+      "executors": [
+        {
+          "type": "disk_group_control",
+          "diskGroupId": 1,
+          "diskAction": "online"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "category": "fan",
+      "name": "系统日志 ERROR → 发送告警",
+      "description": "日志事件触发：系统日志出现 ERROR 时，执行脚本发送 ntfy 推送告警。",
+      "enabled": true,
+      "scheduleType": "trigger",
+      "createdAt": "2026-09-01T09:00:00+08:00",
+      "updatedAt": "2026-09-25T18:00:00+08:00",
+      "triggers": [
+        {
+          "type": "log",
+          "logEventId": 1
+        }
+      ],
+      "executors": [
+        {
+          "type": "exec_script",
+          "scriptId": 1
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "category": "disk",
+      "name": "监控：下载盘闲置自动下线",
+      "description": "监控事件触发：预制监控检测下载盘（组3）持续闲置时自动下线。",
+      "enabled": true,
+      "scheduleType": "trigger",
+      "createdAt": "2026-09-01T09:00:00+08:00",
+      "updatedAt": "2026-09-25T18:00:00+08:00",
+      "triggers": [
+        {
+          "type": "monitor",
+          "monitorPrebuilt": "idle",
+          "monitorIntervalSec": 60
+        }
+      ],
+      "executors": [
+        {
+          "type": "disk_group_control",
+          "diskGroupId": 3,
+          "diskAction": "offline"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "category": "disk",
+      "name": "下电前：数据同步 + 通知",
+      "description": "被硬盘组 1 引用：影音库下电前先执行 sync 落盘，再发通知；失败将终止正常下电。",
+      "enabled": true,
+      "scheduleType": "trigger",
+      "createdAt": "2026-09-01T09:00:00+08:00",
+      "updatedAt": "2026-09-25T18:00:00+08:00",
+      "triggers": [
+        {
+          "type": "time",
+          "period": "daily",
+          "time": "03:00"
+        }
+      ],
+      "executors": [
+        {
+          "type": "exec_script",
+          "scriptId": 2
+        },
+        {
+          "type": "exec_script",
+          "scriptId": 1,
+          "delaySec": 0
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "category": "disk",
+      "name": "上电后：启动备份服务",
+      "description": "被硬盘组 2 引用：冷备归档上电后异步启动 rsync 增量备份任务。",
+      "enabled": true,
+      "scheduleType": "trigger",
+      "createdAt": "2026-09-01T09:00:00+08:00",
+      "updatedAt": "2026-09-25T18:00:00+08:00",
+      "triggers": [
+        {
+          "type": "time",
+          "period": "daily",
+          "time": "08:00"
+        }
+      ],
+      "executors": [
+        {
+          "type": "exec_script",
+          "scriptId": 3
+        }
+      ]
+    }
+  ],
+  "logEvents": [
+    {
+      "id": 1,
+      "name": "系统日志 ERROR",
+      "path": "/var/log/syslog",
+      "regex": "ERROR",
+      "cooldown": 5,
+      "cooldownUnit": "minute",
+      "consecutive": 1,
+      "rotate": true,
+      "createdAt": "2026-09-01T09:00:00+08:00",
+      "updatedAt": "2026-09-20T14:00:00+08:00"
+    },
+    {
+      "id": 2,
+      "name": "UPS 市电异常",
+      "path": "/var/log/ups.log",
+      "regex": "(power fail|battery low)",
+      "cooldown": 10,
+      "cooldownUnit": "minute",
+      "consecutive": 2,
+      "rotate": false,
+      "createdAt": "2026-09-01T09:00:00+08:00",
+      "updatedAt": "2026-09-21T11:00:00+08:00"
+    }
+  ]
+}

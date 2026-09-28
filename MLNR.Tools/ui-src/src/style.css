@@ -1,0 +1,953 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== MLNR 麻辣牛肉控制器专用主题（v3 专业监控台风格，方向 B） =====
+   设计令牌：
+   - 暗色蓝黑底 #0A0E14 → 面板 #111827 → 元素 #1B2432 → hover #1D2535，共 5 级灰度 + 冷色相
+   - 主色 #3B82F6，强调青 #22D3EE；语义色绿/琥珀/红
+   - 圆角体系 8/10/999px；卡片描边半透明白提亮边缘 + 柔和阴影
+*/
+
+:root {
+  /* ===== v3 暗色主题 ===== */
+  /* 页面背景 */
+  --c-page: 10 14 20;                       /* #0A0E14 蓝黑底 */
+
+  /* 列表/清单背景 */
+  --c-surface: 17 24 39;                    /* #111827 面板 */
+  --c-surface-hover: 29 37 51;              /* hover 态 */
+  --c-surface-alt: 30 41 59;                /* 蓝色系点缀 */
+
+  /* 按钮/其他元素背景 */
+  --c-element: 27 36 50;                    /* #1B2432 */
+
+  /* 主按钮色 */
+  --c-primary: 59 130 246;                  /* #3B82F6 */
+  --c-primary-hover: 45 110 225;            /* 略加深 */
+  --c-primary-soft: 30 41 59;
+  --c-primary-soft-text: 147 197 253;
+
+  /* 连接状态色 */
+  --c-success: 16 185 129;                  /* 已连接 */
+  --c-success-hover: 5 150 105;
+  --c-success-soft: 6 46 40;
+  --c-success-soft-text: 110 231 183;
+  --c-warning: 245 158 11;                  /* 连接中 */
+  --c-warning-hover: 217 119 6;
+  --c-warning-soft: 64 42 14;
+  --c-warning-soft-text: 252 211 77;
+  --c-danger: 239 68 68;                    /* 未连接 */
+  --c-danger-hover: 220 38 38;
+  --c-danger-soft: 69 22 26;
+  --c-danger-soft-text: 252 165 165;
+
+  /* 强调色（青色变体，科技感点缀） */
+  --c-accent: 34 211 238;                   /* #22D3EE */
+  --c-accent-soft: 14 47 63;
+  --c-accent-soft-text: 103 232 249;
+  --c-download: 34 211 238;
+  --c-download-soft: 14 47 63;
+  --c-download-soft-text: 103 232 249;
+
+  /* 中性色 */
+  --c-neutral: 100 116 139;
+  --c-neutral-soft: 30 41 59;
+  --c-neutral-soft-text: 148 163 184;
+
+  /* 文字 */
+  --c-ink: 248 250 252;                     /* 主要文本 */
+  --c-ink-muted: 148 163 184;               /* 普通文本 */
+  --c-ink-subtle: 100 116 139;              /* 辅助文本 */
+
+  /* 信号强度文本 */
+  --c-signal: 103 232 249;
+
+  /* 分割线/描边（半透明提亮边缘） */
+  --c-line: 51 65 85;
+  --c-line-subtle: 30 41 59;
+
+  /* ===== 图表绘制色（Canvas 绘制时经 getComputedStyle 读取，随主题切换） ===== */
+  --c-chart-grid: 51 65 85;                 /* 网格线 */
+  --c-chart-axis: 51 65 85;                 /* 坐标轴/边框 */
+  --c-chart-text: 148 163 184;              /* 轴刻度文字 */
+  --c-chart-cursor: 148 163 184;            /* 悬停参考线 */
+  --c-chart-tooltip-bg: 30 30 30;           /* 悬停提示背景 */
+  --c-chart-tooltip-border: 151 153 153;    /* 悬停提示描边 */
+  --c-chart-tooltip-time: 151 153 153;      /* 提示时间行文字 */
+  --c-chart-tooltip-text: 200 200 200;      /* 提示数据行文字 */
+  --c-chart-dot-stroke: 26 26 26;           /* 数据点描边 */
+
+  /* 图表系列色（趋势图多序列，随主题色系调整） */
+  --c-series-1: 59 130 246;                 /* 蓝 */
+  --c-series-2: 34 197 94;                  /* 绿 */
+  --c-series-3: 245 158 11;                 /* 琥珀 */
+  --c-series-4: 239 68 68;                  /* 红 */
+  --c-series-5: 139 92 246;                 /* 紫 */
+  --c-series-6: 6 182 212;                  /* 青 */
+  --c-series-7: 236 72 153;                 /* 粉 */
+  --c-series-8: 132 204 22;                 /* 黄绿 */
+
+  /* 健康度/信号色阶（≥90 优 / ≥75 良 / ≥50 中 / ≥25 差 / <25 极差，语义跨主题统一） */
+  --c-health-good: 16 185 129;
+  --c-health-fair: 52 211 153;
+  --c-health-warn: 245 158 11;
+  --c-health-poor: 249 115 22;
+  --c-health-bad: 239 68 68;
+
+  /* 加密会话标识色 */
+  --c-encrypt: 139 92 246;
+
+  /* 固定层：主色上的前景文字/圆点、模态遮罩、阴影（配 alpha 使用） */
+  --c-on-primary: 255 255 255;
+  --c-overlay: 0 0 0;
+  --c-shadow: 0 0 0;
+}
+
+/* 亮色主题（v3：冷白底 + 蓝主色） */
+[data-theme="light"] {
+  --c-page: 243 245 249;
+  --c-surface: 255 255 255;
+  --c-surface-hover: 242 244 248;
+  --c-surface-alt: 233 239 250;
+  --c-element: 235 239 246;
+  --c-primary: 37 99 235;
+  --c-primary-hover: 29 82 208;
+  --c-primary-soft: 229 237 253;
+  --c-primary-soft-text: 30 64 175;
+  --c-success: 5 150 105;
+  --c-success-hover: 4 120 87;
+  --c-success-soft: 214 245 232;
+  --c-success-soft-text: 4 120 87;
+  --c-warning: 217 119 6;
+  --c-warning-hover: 180 95 5;
+  --c-warning-soft: 252 240 218;
+  --c-warning-soft-text: 146 80 10;
+  --c-danger: 220 38 38;
+  --c-danger-hover: 185 28 28;
+  --c-danger-soft: 252 228 228;
+  --c-danger-soft-text: 180 30 30;
+  --c-accent: 8 145 178;
+  --c-accent-soft: 224 242 250;
+  --c-accent-soft-text: 14 116 144;
+  --c-download: 8 145 178;
+  --c-download-soft: 224 242 250;
+  --c-download-soft-text: 14 116 144;
+  --c-neutral: 107 114 128;
+  --c-neutral-soft: 241 243 247;
+  --c-neutral-soft-text: 75 85 99;
+  --c-ink: 15 23 42;
+  --c-ink-muted: 71 85 105;
+  --c-ink-subtle: 148 163 184;
+  --c-signal: 8 145 178;
+  --c-line: 226 232 240;
+  --c-line-subtle: 241 245 249;
+
+  /* 图表绘制色（浅色主题：深文字、浅网格） */
+  --c-chart-grid: 226 232 240;
+  --c-chart-axis: 148 163 184;
+  --c-chart-text: 107 114 128;
+  --c-chart-cursor: 107 114 128;
+  --c-chart-tooltip-bg: 255 255 255;
+  --c-chart-tooltip-border: 203 213 225;
+  --c-chart-tooltip-time: 100 100 100;
+  --c-chart-tooltip-text: 50 50 50;
+  --c-chart-dot-stroke: 255 255 255;
+  --c-series-1: 37 99 235;
+  --c-series-2: 22 163 74;
+  --c-series-3: 217 119 6;
+  --c-series-4: 220 38 38;
+  --c-series-5: 124 58 237;
+  --c-series-6: 8 145 178;
+  --c-series-7: 219 39 119;
+  --c-series-8: 101 163 13;
+  --c-health-good: 5 150 105;
+  --c-health-fair: 13 148 136;
+  --c-health-warn: 217 119 6;
+  --c-health-poor: 234 88 12;
+  --c-health-bad: 220 38 38;
+  --c-encrypt: 124 58 237;
+  --c-on-primary: 255 255 255;
+  --c-overlay: 0 0 0;
+  --c-shadow: 0 0 0;
+}
+
+/* 护眼暖主题（sepia：浅色暖调纸面，低蓝光；主色暖棕） */
+[data-theme="sepia"] {
+  --c-page: 246 241 229;
+  --c-surface: 255 251 242;
+  --c-surface-hover: 244 236 220;
+  --c-surface-alt: 240 230 210;
+  --c-element: 236 226 206;
+  --c-primary: 180 118 54;
+  --c-primary-hover: 158 102 45;
+  --c-primary-soft: 244 233 214;
+  --c-primary-soft-text: 132 86 40;
+  --c-success: 94 138 66;
+  --c-success-hover: 76 116 52;
+  --c-success-soft: 232 242 222;
+  --c-success-soft-text: 72 105 52;
+  --c-warning: 196 130 40;
+  --c-warning-hover: 170 110 32;
+  --c-warning-soft: 250 238 212;
+  --c-warning-soft-text: 148 96 30;
+  --c-danger: 186 78 60;
+  --c-danger-hover: 160 62 48;
+  --c-danger-soft: 248 228 222;
+  --c-danger-soft-text: 150 58 46;
+  --c-accent: 146 118 52;
+  --c-accent-soft: 240 232 210;
+  --c-accent-soft-text: 110 88 40;
+  --c-download: 146 118 52;
+  --c-download-soft: 240 232 210;
+  --c-download-soft-text: 110 88 40;
+  --c-neutral: 138 126 106;
+  --c-neutral-soft: 241 233 217;
+  --c-neutral-soft-text: 108 98 82;
+  --c-ink: 74 62 46;
+  --c-ink-muted: 120 106 86;
+  --c-ink-subtle: 162 148 124;
+  --c-signal: 146 118 52;
+  --c-line: 224 212 186;
+  --c-line-subtle: 236 227 207;
+
+  /* 图表绘制色（护眼暖：暖调网格与文字） */
+  --c-chart-grid: 224 212 186;
+  --c-chart-axis: 162 148 124;
+  --c-chart-text: 120 106 86;
+  --c-chart-cursor: 120 106 86;
+  --c-chart-tooltip-bg: 255 251 242;
+  --c-chart-tooltip-border: 224 212 186;
+  --c-chart-tooltip-time: 138 126 106;
+  --c-chart-tooltip-text: 74 62 46;
+  --c-chart-dot-stroke: 255 251 242;
+  --c-series-1: 180 118 54;
+  --c-series-2: 94 138 66;
+  --c-series-3: 196 130 40;
+  --c-series-4: 186 78 60;
+  --c-series-5: 140 100 180;
+  --c-series-6: 90 140 130;
+  --c-series-7: 176 90 130;
+  --c-series-8: 130 150 60;
+  --c-health-good: 94 138 66;
+  --c-health-fair: 60 130 110;
+  --c-health-warn: 196 130 40;
+  --c-health-poor: 205 110 40;
+  --c-health-bad: 186 78 60;
+  --c-encrypt: 139 92 246;
+  --c-on-primary: 255 255 255;
+  --c-overlay: 0 0 0;
+  --c-shadow: 0 0 0;
+}
+
+/* 午夜蓝主题（midnight：深蓝紫调极暗，主色靛紫） */
+[data-theme="midnight"] {
+  --c-page: 9 11 20;
+  --c-surface: 14 17 30;
+  --c-surface-hover: 23 27 45;
+  --c-surface-alt: 27 31 52;
+  --c-element: 21 25 41;
+  --c-primary: 139 148 250;
+  --c-primary-hover: 116 125 235;
+  --c-primary-soft: 31 35 62;
+  --c-primary-soft-text: 172 180 252;
+  --c-success: 52 199 153;
+  --c-success-hover: 35 175 130;
+  --c-success-soft: 8 42 36;
+  --c-success-soft-text: 110 231 183;
+  --c-warning: 245 158 11;
+  --c-warning-hover: 217 119 6;
+  --c-warning-soft: 64 42 14;
+  --c-warning-soft-text: 252 211 77;
+  --c-danger: 244 88 88;
+  --c-danger-hover: 220 55 55;
+  --c-danger-soft: 70 24 32;
+  --c-danger-soft-text: 254 160 160;
+  --c-accent: 167 139 250;
+  --c-accent-soft: 40 33 70;
+  --c-accent-soft-text: 199 186 252;
+  --c-download: 167 139 250;
+  --c-download-soft: 40 33 70;
+  --c-download-soft-text: 199 186 252;
+  --c-neutral: 108 116 146;
+  --c-neutral-soft: 28 32 52;
+  --c-neutral-soft-text: 165 172 200;
+  --c-ink: 228 232 248;
+  --c-ink-muted: 158 166 194;
+  --c-ink-subtle: 110 118 150;
+  --c-signal: 167 139 250;
+  --c-line: 45 51 78;
+  --c-line-subtle: 27 31 52;
+
+  /* 图表绘制色（午夜蓝：紫调网格与文字） */
+  --c-chart-grid: 45 51 78;
+  --c-chart-axis: 45 51 78;
+  --c-chart-text: 158 166 194;
+  --c-chart-cursor: 158 166 194;
+  --c-chart-tooltip-bg: 24 27 46;
+  --c-chart-tooltip-border: 110 118 150;
+  --c-chart-tooltip-time: 158 166 194;
+  --c-chart-tooltip-text: 210 216 235;
+  --c-chart-dot-stroke: 24 27 46;
+  --c-series-1: 139 148 250;
+  --c-series-2: 52 199 153;
+  --c-series-3: 245 158 11;
+  --c-series-4: 244 88 88;
+  --c-series-5: 167 139 250;
+  --c-series-6: 56 189 248;
+  --c-series-7: 244 114 182;
+  --c-series-8: 163 230 53;
+  --c-health-good: 52 199 153;
+  --c-health-fair: 52 211 153;
+  --c-health-warn: 245 158 11;
+  --c-health-poor: 249 115 22;
+  --c-health-bad: 244 88 88;
+  --c-encrypt: 167 139 250;
+  --c-on-primary: 255 255 255;
+  --c-overlay: 0 0 0;
+  --c-shadow: 0 0 0;
+}
+
+/* ===== 配色风格（palette）：叠加 data-palette 覆盖强调色，不改变明暗逻辑 =====
+   default（默认蓝）不定义覆盖，沿用 :root / [data-theme=light] 现值。 */
+
+/* 翡翠绿 */
+[data-theme="dark"][data-palette="emerald"] {
+  --c-primary: 16 185 129; --c-primary-hover: 5 150 105;
+  --c-primary-soft: 6 46 40; --c-primary-soft-text: 110 231 183;
+  --c-accent: 52 211 153; --c-accent-soft: 6 52 40; --c-accent-soft-text: 110 231 183;
+  --c-download: 52 211 153; --c-download-soft: 6 52 40; --c-download-soft-text: 110 231 183;
+}
+[data-theme="light"][data-palette="emerald"] {
+  --c-primary: 5 150 105; --c-primary-hover: 4 120 87;
+  --c-primary-soft: 209 250 229; --c-primary-soft-text: 6 95 70;
+  --c-accent: 13 148 136; --c-accent-soft: 204 251 241; --c-accent-soft-text: 15 118 110;
+  --c-download: 13 148 136; --c-download-soft: 204 251 241; --c-download-soft-text: 15 118 110;
+}
+
+/* 海盐青 */
+[data-theme="dark"][data-palette="ocean"] {
+  --c-primary: 14 165 233; --c-primary-hover: 2 132 199;
+  --c-primary-soft: 12 44 64; --c-primary-soft-text: 125 211 252;
+  --c-accent: 34 211 238; --c-accent-soft: 14 47 63; --c-accent-soft-text: 103 232 249;
+  --c-download: 34 211 238; --c-download-soft: 14 47 63; --c-download-soft-text: 103 232 249;
+}
+[data-theme="light"][data-palette="ocean"] {
+  --c-primary: 2 132 199; --c-primary-hover: 3 105 161;
+  --c-primary-soft: 224 242 254; --c-primary-soft-text: 12 74 110;
+  --c-accent: 8 145 178; --c-accent-soft: 224 242 250; --c-accent-soft-text: 14 116 144;
+  --c-download: 8 145 178; --c-download-soft: 224 242 250; --c-download-soft-text: 14 116 144;
+}
+
+/* 暖阳橙 */
+[data-theme="dark"][data-palette="sunset"] {
+  --c-primary: 249 115 22; --c-primary-hover: 234 88 12;
+  --c-primary-soft: 68 37 12; --c-primary-soft-text: 253 186 116;
+  --c-accent: 251 146 60; --c-accent-soft: 68 39 12; --c-accent-soft-text: 253 186 116;
+  --c-download: 251 146 60; --c-download-soft: 68 39 12; --c-download-soft-text: 253 186 116;
+}
+[data-theme="light"][data-palette="sunset"] {
+  --c-primary: 234 88 12; --c-primary-hover: 194 65 12;
+  --c-primary-soft: 255 237 213; --c-primary-soft-text: 154 52 18;
+  --c-accent: 217 119 6; --c-accent-soft: 254 243 199; --c-accent-soft-text: 146 80 10;
+  --c-download: 217 119 6; --c-download-soft: 254 243 199; --c-download-soft-text: 146 80 10;
+}
+
+/* 葡萄紫 */
+[data-theme="dark"][data-palette="grape"] {
+  --c-primary: 139 92 246; --c-primary-hover: 124 58 237;
+  --c-primary-soft: 46 34 72; --c-primary-soft-text: 196 181 253;
+  --c-accent: 167 139 250; --c-accent-soft: 49 38 78; --c-accent-soft-text: 196 181 253;
+  --c-download: 167 139 250; --c-download-soft: 49 38 78; --c-download-soft-text: 196 181 253;
+}
+[data-theme="light"][data-palette="grape"] {
+  --c-primary: 124 58 237; --c-primary-hover: 109 40 217;
+  --c-primary-soft: 237 233 254; --c-primary-soft-text: 76 29 149;
+  --c-accent: 124 58 237; --c-accent-soft: 237 233 254; --c-accent-soft-text: 76 29 149;
+  --c-download: 124 58 237; --c-download-soft: 237 233 254; --c-download-soft-text: 76 29 149;
+}
+
+/* 玫瑰粉 */
+[data-theme="dark"][data-palette="rose"] {
+  --c-primary: 244 114 182; --c-primary-hover: 236 72 153;
+  --c-primary-soft: 70 28 50; --c-primary-soft-text: 249 168 212;
+  --c-accent: 251 113 133; --c-accent-soft: 70 27 38; --c-accent-soft-text: 253 164 175;
+  --c-download: 251 113 133; --c-download-soft: 70 27 38; --c-download-soft-text: 253 164 175;
+}
+[data-theme="light"][data-palette="rose"] {
+  --c-primary: 219 39 119; --c-primary-hover: 190 24 93;
+  --c-primary-soft: 252 231 243; --c-primary-soft-text: 157 23 77;
+  --c-accent: 225 29 72; --c-accent-soft: 255 228 230; --c-accent-soft-text: 190 18 60;
+  --c-download: 225 29 72; --c-download-soft: 255 228 230; --c-download-soft-text: 190 18 60;
+}
+
+/* 护眼暖（浅色暖调纸面）：配色风格沿用亮色系强调色数值 */
+[data-theme="sepia"][data-palette="emerald"] {
+  --c-primary: 5 150 105; --c-primary-hover: 4 120 87;
+  --c-primary-soft: 209 250 229; --c-primary-soft-text: 6 95 70;
+  --c-accent: 13 148 136; --c-accent-soft: 204 251 241; --c-accent-soft-text: 15 118 110;
+  --c-download: 13 148 136; --c-download-soft: 204 251 241; --c-download-soft-text: 15 118 110;
+}
+[data-theme="sepia"][data-palette="ocean"] {
+  --c-primary: 2 132 199; --c-primary-hover: 3 105 161;
+  --c-primary-soft: 224 242 254; --c-primary-soft-text: 12 74 110;
+  --c-accent: 8 145 178; --c-accent-soft: 224 242 250; --c-accent-soft-text: 14 116 144;
+  --c-download: 8 145 178; --c-download-soft: 224 242 250; --c-download-soft-text: 14 116 144;
+}
+[data-theme="sepia"][data-palette="sunset"] {
+  --c-primary: 234 88 12; --c-primary-hover: 194 65 12;
+  --c-primary-soft: 255 237 213; --c-primary-soft-text: 154 52 18;
+  --c-accent: 217 119 6; --c-accent-soft: 254 243 199; --c-accent-soft-text: 146 80 10;
+  --c-download: 217 119 6; --c-download-soft: 254 243 199; --c-download-soft-text: 146 80 10;
+}
+[data-theme="sepia"][data-palette="grape"] {
+  --c-primary: 124 58 237; --c-primary-hover: 109 40 217;
+  --c-primary-soft: 237 233 254; --c-primary-soft-text: 76 29 149;
+  --c-accent: 124 58 237; --c-accent-soft: 237 233 254; --c-accent-soft-text: 76 29 149;
+  --c-download: 124 58 237; --c-download-soft: 237 233 254; --c-download-soft-text: 76 29 149;
+}
+[data-theme="sepia"][data-palette="rose"] {
+  --c-primary: 219 39 119; --c-primary-hover: 190 24 93;
+  --c-primary-soft: 252 231 243; --c-primary-soft-text: 157 23 77;
+  --c-accent: 225 29 72; --c-accent-soft: 255 228 230; --c-accent-soft-text: 190 18 60;
+  --c-download: 225 29 72; --c-download-soft: 255 228 230; --c-download-soft-text: 190 18 60;
+}
+
+/* 午夜蓝（深色蓝紫底）：配色风格沿用暗色系强调色数值 */
+[data-theme="midnight"][data-palette="emerald"] {
+  --c-primary: 16 185 129; --c-primary-hover: 5 150 105;
+  --c-primary-soft: 6 46 40; --c-primary-soft-text: 110 231 183;
+  --c-accent: 52 211 153; --c-accent-soft: 6 52 40; --c-accent-soft-text: 110 231 183;
+  --c-download: 52 211 153; --c-download-soft: 6 52 40; --c-download-soft-text: 110 231 183;
+}
+[data-theme="midnight"][data-palette="ocean"] {
+  --c-primary: 14 165 233; --c-primary-hover: 2 132 199;
+  --c-primary-soft: 12 44 64; --c-primary-soft-text: 125 211 252;
+  --c-accent: 34 211 238; --c-accent-soft: 14 47 63; --c-accent-soft-text: 103 232 249;
+  --c-download: 34 211 238; --c-download-soft: 14 47 63; --c-download-soft-text: 103 232 249;
+}
+[data-theme="midnight"][data-palette="sunset"] {
+  --c-primary: 249 115 22; --c-primary-hover: 234 88 12;
+  --c-primary-soft: 68 37 12; --c-primary-soft-text: 253 186 116;
+  --c-accent: 251 146 60; --c-accent-soft: 68 39 12; --c-accent-soft-text: 253 186 116;
+  --c-download: 251 146 60; --c-download-soft: 68 39 12; --c-download-soft-text: 253 186 116;
+}
+[data-theme="midnight"][data-palette="grape"] {
+  --c-primary: 139 92 246; --c-primary-hover: 124 58 237;
+  --c-primary-soft: 46 34 72; --c-primary-soft-text: 196 181 253;
+  --c-accent: 167 139 250; --c-accent-soft: 49 38 78; --c-accent-soft-text: 196 181 253;
+  --c-download: 167 139 250; --c-download-soft: 49 38 78; --c-download-soft-text: 196 181 253;
+}
+[data-theme="midnight"][data-palette="rose"] {
+  --c-primary: 244 114 182; --c-primary-hover: 236 72 153;
+  --c-primary-soft: 70 28 50; --c-primary-soft-text: 249 168 212;
+  --c-accent: 251 113 133; --c-accent-soft: 70 27 38; --c-accent-soft-text: 253 164 175;
+  --c-download: 251 113 133; --c-download-soft: 70 27 38; --c-download-soft-text: 253 164 175;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: rgb(var(--c-element)); border-radius: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: rgb(var(--c-page));
+  color: rgb(var(--c-ink-muted));
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ===== 组件类 ===== */
+@layer components {
+  /* 通用按钮：扁平化，无边框 */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm
+           transition-colors duration-150
+           disabled:opacity-40 disabled:cursor-not-allowed
+           select-none;
+    background: rgb(var(--c-element));
+    color: rgb(var(--c-ink-muted));
+    border: none;
+    outline: none;
+    border-radius: 8px;
+  }
+  .btn:hover:not(:disabled) {
+    background: rgb(var(--c-surface-alt));
+    color: rgb(var(--c-ink));
+  }
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
+  /* 主按钮：蓝色 */
+  .btn-primary {
+    background: rgb(var(--c-primary));
+    color: rgb(var(--c-on-primary));
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: rgb(var(--c-primary-hover));
+    color: rgb(var(--c-on-primary));
+  }
+
+  /* 成功/连接按钮：绿色 */
+  .btn-success {
+    background: rgb(var(--c-success));
+    color: rgb(var(--c-on-primary));
+  }
+  .btn-success:hover:not(:disabled) {
+    background: rgb(var(--c-success-hover));
+    color: rgb(var(--c-on-primary));
+  }
+
+  /* 危险/断开按钮：红色 */
+  .btn-danger {
+    background: rgb(var(--c-danger));
+    color: rgb(var(--c-on-primary));
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: rgb(var(--c-danger-hover));
+    color: rgb(var(--c-on-primary));
+  }
+
+  /* 小按钮 */
+  .btn-sm {
+    @apply px-3 py-1 text-xs;
+  }
+
+  /* 输入框：扁平化（弱边框保证在卡片上轮廓清晰） */
+  .input {
+    @apply w-full px-3 py-2 text-sm outline-none transition-colors;
+    background: rgb(var(--c-element));
+    color: rgb(var(--c-ink));
+    border: 1px solid rgb(var(--c-ink-subtle) / 0.35);
+    border-radius: 8px;
+  }
+  .input:focus {
+    border-color: rgb(var(--c-primary) / 0.5);
+  }
+  .input::placeholder {
+    color: rgb(var(--c-ink-subtle));
+  }
+
+  /* 下拉框：与输入框同底/同边框/同圆角，仅保留右侧小箭头，视觉统一 */
+  select.input {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    cursor: pointer;
+    padding-right: 30px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+  }
+  select.input option {
+    background: rgb(var(--c-element));
+    color: rgb(var(--c-ink));
+  }
+
+  /* 卡片/列表项：v3 面板（描边 + 柔和阴影 + 大圆角） */
+  .card {
+    background: rgb(var(--c-surface));
+    border: 1px solid rgb(var(--c-line) / 0.55);
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgb(var(--c-shadow) / 0.18);
+  }
+
+  /* 徽标 */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 text-xs font-medium;
+    border-radius: 10px;
+  }
+
+  /* 滑动条：自定义样式 */
+  .range-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    background: rgb(var(--c-element));
+    border-radius: 3px;
+    outline: none;
+    cursor: pointer;
+  }
+  .range-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    background: rgb(var(--c-primary));
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgb(var(--c-shadow) / 0.4);
+    transition: transform 0.15s;
+  }
+  .range-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+  }
+  .range-slider::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    background: rgb(var(--c-primary));
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgb(var(--c-shadow) / 0.4);
+  }
+
+  /* 开关（Toggle） */
+  .toggle {
+    @apply relative inline-flex items-center cursor-pointer;
+    width: 40px;
+    height: 22px;
+  }
+  .toggle input {
+    @apply sr-only;
+  }
+  .toggle-slider {
+    @apply absolute inset-0 transition-colors;
+    /* 关闭态：用 --c-ink-subtle 作明显槽色（明暗主题下均与输入框/卡片背景可辨） */
+    background: rgb(var(--c-ink-subtle));
+    border-radius: 22px;
+  }
+  .toggle-slider::before {
+    content: "";
+    @apply absolute transition-all;
+    width: 18px;
+    height: 18px;
+    left: 2px;
+    top: 2px;
+    /* 关闭态圆点：--c-ink 在槽色上对比最强 */
+    background: rgb(var(--c-ink));
+    border-radius: 50%;
+  }
+  .toggle input:checked + .toggle-slider {
+    background: rgb(var(--c-primary));
+  }
+  .toggle input:checked + .toggle-slider::before {
+    transform: translateX(18px);
+    background: rgb(var(--c-on-primary));
+  }
+
+  /* 状态指示小圆点 */
+  .status-dot {
+    @apply inline-block w-2 h-2 rounded-full;
+  }
+  .status-dot-connected { background: rgb(var(--c-success)); }
+  .status-dot-connecting { background: rgb(var(--c-warning)); }
+  .status-dot-disconnected { background: rgb(var(--c-danger)); }
+
+  /* ===== 双转速滑条（需求 §3：滑块=目标转速，色带=实际转速） ===== */
+  .dual-slider {
+    @apply relative w-full;
+    height: 30px;
+    touch-action: pan-y;
+  }
+  .dual-slider .ds-track {
+    @apply absolute overflow-hidden rounded-full;
+    left: 0; right: 0; top: 12px; height: 6px;
+    background: rgb(var(--c-element));
+  }
+  /* 实际转速色带（绿色，硬件上报 CUR_SPD） */
+  .dual-slider .ds-actual {
+    @apply absolute left-0 top-0 h-full;
+    background: rgb(var(--c-success) / 0.75);
+    transition: width 0.4s ease-out;
+  }
+  /* 目标转速色带（蓝色半透明，下发 TARGET_SPD） */
+  .dual-slider .ds-target {
+    @apply absolute left-0 top-0 h-full;
+    background: rgb(var(--c-primary) / 0.45);
+    transition: width 0.15s ease-out;
+  }
+  .dual-slider input[type="range"] {
+    @apply absolute inset-0 w-full m-0;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    cursor: pointer;
+  }
+  .dual-slider input[type="range"]:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+  .dual-slider input[type="range"]::-webkit-slider-runnable-track {
+    height: 30px;
+    background: transparent;
+    border: none;
+  }
+  .dual-slider input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px; height: 18px;
+    margin-top: 6px;
+    border-radius: 50%;
+    background: rgb(var(--c-on-primary));
+    border: 3px solid rgb(var(--c-primary));
+    box-shadow: 0 2px 8px rgb(var(--c-shadow) / 0.5);
+    transition: transform 0.15s;
+  }
+  .dual-slider input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+  }
+  .dual-slider input[type="range"]::-moz-range-track {
+    height: 30px;
+    background: transparent;
+    border: none;
+  }
+  .dual-slider input[type="range"]::-moz-range-thumb {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: rgb(var(--c-on-primary));
+    border: 3px solid rgb(var(--c-primary));
+    box-shadow: 0 2px 8px rgb(var(--c-shadow) / 0.5);
+  }
+
+  /* ===== 分段控件（自动/手动模式切换） ===== */
+  .seg {
+    @apply inline-flex p-0.5 rounded-md;
+    background: rgb(var(--c-element));
+  }
+  .seg button {
+    @apply px-3 py-1 text-xs rounded transition-colors select-none;
+    background: transparent;
+    border: none;
+    color: rgb(var(--c-ink-muted));
+    cursor: pointer;
+  }
+  .seg button.seg-active {
+    background: rgb(var(--c-primary));
+    color: rgb(var(--c-on-primary));
+  }
+  .seg button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* ===== 图例 chip（图表系列显隐） ===== */
+  .legend-chip {
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 text-xs rounded cursor-pointer select-none;
+    background: rgb(var(--c-element));
+    color: rgb(var(--c-ink-muted));
+    transition: opacity 0.15s;
+  }
+  .legend-chip:hover {
+    color: rgb(var(--c-ink));
+  }
+  .legend-chip .chip-dot {
+    @apply inline-block w-2.5 h-2.5 rounded-sm;
+  }
+  .legend-chip.chip-hidden {
+    opacity: 0.35;
+    text-decoration: line-through;
+  }
+
+  /* ===== Gate 提示横幅（未连接/未初始化等） ===== */
+  .gate-banner {
+    @apply flex flex-col sm:flex-row items-start sm:items-center gap-3 px-4 py-3 rounded-lg;
+    background: rgb(var(--c-surface));
+    border-left: 3px solid rgb(var(--c-warning));
+  }
+  .gate-banner .gate-icon {
+    @apply flex items-center justify-center shrink-0;
+    width: 34px; height: 34px;
+    border-radius: 8px;
+    background: rgb(var(--c-warning-soft));
+    color: rgb(var(--c-warning-soft-text));
+  }
+
+  /* ===== 设置项行 ===== */
+  .form-row {
+    @apply flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 py-2.5;
+    border-bottom: 1px solid rgb(var(--c-line-subtle));
+  }
+  .form-row:last-child {
+    border-bottom: none;
+  }
+  .form-row .form-label {
+    @apply text-sm shrink-0;
+    color: rgb(var(--c-ink-muted));
+    /* 宽度自适应屏幕（需求 1.2：说明文本根据屏幕空间自动伸缩） */
+    width: auto;
+    min-width: 120px;
+    flex-shrink: 0;
+  }
+  .form-row .form-hint {
+    @apply text-xs mt-0.5;
+    color: rgb(var(--c-ink-subtle));
+  }
+
+  /* ===== 问号 Tooltip（悬停/聚焦显示长说明） ===== */
+  .help-tip-wrap {
+    @apply relative inline-flex items-center align-middle;
+    margin-left: 5px;
+    cursor: help;
+    outline: none;
+    border-radius: 4px;
+    vertical-align: -2px;
+  }
+  .help-tip-wrap .help-tip-bubble {
+    @apply absolute;
+    bottom: calc(100% + 7px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: 340px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    background: rgb(var(--c-surface));
+    color: rgb(var(--c-ink));
+    border: 1px solid rgb(var(--c-line) / 0.55);
+    box-shadow: 0 6px 20px rgb(var(--c-shadow) / 0.22);
+    font-size: 12px;
+    line-height: 1.6;
+    font-weight: 400;
+    text-align: left;
+    white-space: normal;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .12s ease, visibility .12s ease;
+    z-index: 80;
+    pointer-events: none;
+  }
+  /* 深色系下加重阴影（浅色描边已随主题变量切换） */
+  [data-theme="dark"] .help-tip-bubble,
+  [data-theme="midnight"] .help-tip-bubble {
+    box-shadow: 0 6px 22px rgb(var(--c-shadow) / 0.5);
+  }
+  .help-tip-wrap:hover .help-tip-bubble,
+  .help-tip-wrap:focus .help-tip-bubble,
+  .help-tip-wrap:focus-within .help-tip-bubble {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  /* 转速圆环 */
+  .speed-ring-bg {
+    stroke: rgb(var(--c-element));
+  }
+  .speed-ring-fg {
+    stroke: rgb(var(--c-primary));
+    transition: stroke-dashoffset 0.5s ease-out;
+  }
+
+  /* ===== v3 组件库样式 ===== */
+
+  /* 进度条轨道/填充（KPI 迷你条、温度临界条、合并速度条共用） */
+  .bar-track {
+    position: relative;
+    height: 6px;
+    border-radius: 999px;
+    background: rgb(var(--c-element));
+    overflow: hidden;
+  }
+  .bar-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    border-radius: 999px;
+    transition: width 0.4s ease-out;
+  }
+  .bar-fill-overlay {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    border-radius: 999px;
+    transition: width 0.15s ease-out;
+  }
+
+  /* 胶囊分段切换（历史趋势 Tab 等） */
+  .seg-tab {
+    @apply inline-flex p-1 gap-1;
+    background: rgb(var(--c-element));
+    border-radius: 999px;
+  }
+  .seg-tab button {
+    @apply px-3.5 py-1.5 text-xs rounded-full transition-colors select-none whitespace-nowrap;
+    background: transparent;
+    border: none;
+    color: rgb(var(--c-ink-muted));
+    cursor: pointer;
+  }
+  .seg-tab button:hover:not(.active) {
+    color: rgb(var(--c-ink));
+  }
+  .seg-tab button.active {
+    background: rgb(var(--c-primary));
+    color: rgb(var(--c-on-primary));
+    box-shadow: 0 1px 4px rgb(var(--c-shadow) / 0.3);
+  }
+
+  /* 最近事件行（监控总览日志摘要） */
+  .event-row {
+    @apply flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors;
+    cursor: pointer;
+  }
+  .event-row:hover {
+    background: rgb(var(--c-element) / 0.5);
+  }
+  .event-row .event-level {
+    @apply shrink-0 w-1.5 h-1.5 rounded-full;
+  }
+  .event-row .event-time {
+    @apply shrink-0 text-xs tabular-nums w-[74px] text-right;
+    color: rgb(var(--c-ink-subtle));
+  }
+  .event-row .event-module {
+    @apply shrink-0 w-16 truncate;
+    font-size: 1rem;
+    color: rgb(var(--c-ink-muted));
+  }
+  .event-row .event-msg {
+    @apply min-w-0;
+    font-size: 1rem;
+    line-height: 1.4;
+    color: rgb(var(--c-ink-muted));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+}
+
+/* ===== 动画 ===== */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.fan-spinning {
+  animation: spin-slow 2s linear infinite;
+  transform-origin: center;
+}
+.fan-spinning-fast {
+  animation: spin-slow 0.8s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.animate-pulse-soft {
+  animation: pulse-soft 2s ease-in-out infinite;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.25s ease-out forwards;
+}

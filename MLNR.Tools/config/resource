@@ -1,0 +1,28 @@
+{
+    "data-share":
+    {
+        "shares":
+        [
+            {
+                "name": "mlnr",
+                "permission":
+                {
+                    "rw":
+                    [
+                        "mlnr"
+                    ]
+                }
+            },
+            {
+                "name": "mlnr/data",
+                "permission":
+                {
+                    "rw":
+                        [
+                            "mlnr"
+                        ]
+                }
+            }
+        ]
+    }
+}

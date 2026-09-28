@@ -1,0 +1,8 @@
+#!/bin/bash
+
+### This script is called after the user uninstalls the application.
+
+# 清理安装时写入的 sudoers 白名单（install_callback 生成）
+rm -f /etc/sudoers.d/mlnr
+
+exit 0

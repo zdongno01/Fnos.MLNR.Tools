@@ -1,0 +1,8 @@
+{
+  "root": true,
+  "defaults": {
+    "run-as": "root"
+  },
+  "username": "mlnr",
+  "groupname": "mlnr"
+}

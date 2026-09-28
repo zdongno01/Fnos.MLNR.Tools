@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>MLNR 蓝牙控制器 · 预览</title>
+    <script>
+      // 外壳模式：以 iframe 承载应用，宽度可由 frame_w 参数控制（默认 1400，模拟桌面；如 frame_w=400 模拟移动）
+      if (!location.search.includes('embed=1')) {
+        // 预览强制桌面布局（等价于 ≥1024px 视口；仅在外壳模式生效，embed 版本按 iframe 实际宽度走真实断点）
+        document.write('<style>aside.hidden{display:block!important}nav.lg\\:hidden{display:none!important}main .grid.grid-cols-1.lg\\:grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))!important}main .grid.grid-cols-1.sm\\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))!important}</style>');
+        var m = /[?&]frame_w=(\d+)/.exec(location.search);
+        var fw = m ? parseInt(m[1], 10) : 1400;
+        document.write('<iframe src="mock-preview.html?embed=1" style="width:' + fw + 'px;height:900px;border:1px solid rgb(51,51,51);display:block"></iframe>');
+        document.write('<div style="color:#888;font-size:12px;padding:8px">预览外壳 · ' + fw + 'px 宽 iframe（模拟视口）</div>');
+      }
+    </script>
+    <script>
+      // ===== 临时预览 Mock（仅用于开发预览，不作为交付物） =====
+      (function () {
+        window.__MLNR_MOCK__ = 1;
+        // 预览环境 rAF 不触发，降级为 setTimeout 驱动渲染管线
+        window.requestAnimationFrame = function (cb) { return window.setTimeout(function () { cb(Date.now()); }, 16); };
+        window.cancelAnimationFrame = function (id) { window.clearTimeout(id); };
+        var NOW = new Date().toISOString();
+
+        function fan(index, enabled, target, cur) {
+          return { index: index, pin: index === 1 ? 'GPIO21' : 'GPIO20', enabled: enabled, pwmFreq: 25000, powerSpd: 30, hbFallback: 50, targetSpd: target, curSpd: cur, heartbeat: 'OK', updatedAt: NOW };
+        }
+        function sw(index, state, system) {
+          return { index: index, pin: 'GPIO' + (10 + index), enabled: true, powerOnState: 1, powerOnDelay: 1000, state: state, system: !!system, updatedAt: NOW };
+        }
+        function diskView(device, alias, serial, mounted, temp) {
+          return { device: device, alias: alias, serial: serial, mountPath: mounted ? '/vol1/' + alias : '', autoMount: true, isNvme: device.indexOf('nvme') === 0, mounted: mounted, temperature: temp };
+        }
+        function group(id, alias, switchN, enabled, online, disks) {
+          return { id: id, alias: alias, switchN: switchN, enabled: enabled, autoOnline: true, online: online, conflict: false, disks: disks || [] };
+        }
+
+        var FANS = [fan(1, true, 60, 64), fan(2, true, 30, 40)];
+        var SWITCHES = [sw(1, 1, true), sw(2, 0, false), sw(3, 1, false), sw(4, 0, false)];
+        var DISK_GROUPS = [
+          group(1, '备份阵列', 1, true, true, [diskView('/dev/sda', '数据盘 sda', 'SN-A1B2C3', true, 45), diskView('/dev/sdb', '数据盘 sdb', 'SN-D4E5F6', true, 41)]),
+          group(2, '冷备盘', 2, true, false, []),
+          group(3, '媒体库', 3, true, true, [diskView('/dev/nvme0n1', 'NVMe 系统盘', 'SN-NVME01', true, 52)]),
+          group(4, '暂存组', 4, false, false, []),
+        ];
+
+        var SENSOR_CHANNELS = [
+          { id: 0, alias: 'AHT20', kind: 1, addr: 56, enabled: true, intervalSec: 2, showTemp: true, showHumi: true, showPress: false, showAlt: false },
+          { id: 1, alias: 'BMP280', kind: 2, addr: 118, enabled: false, intervalSec: 2, showTemp: false, showHumi: false, showPress: false, showAlt: false },
+          { id: 2, alias: 'LM75', kind: 3, addr: 72, enabled: true, intervalSec: 2, showTemp: true, showHumi: false, showPress: false, showAlt: false },
+          { id: 3, alias: 'HTU21D', kind: 4, addr: 64, enabled: false, intervalSec: 2, showTemp: false, showHumi: false, showPress: false, showAlt: false },
+        ];
+
+        // I2C 通道实时读数（对应 SENSOR_CHANNELS 下标；null 表示无数据）
+        var SENSOR_READINGS = [
+          { chId: 0, kind: 1, state: 'OK', temperature: 27.3, humidity: 58.4, pressure: 0, altitude: 0, updatedAt: NOW },
+          { chId: 1, kind: 2, state: 'OK', temperature: 29.8, humidity: 0, pressure: 101325, altitude: 0, updatedAt: NOW },
+          { chId: 2, kind: 3, state: 'OK', temperature: 31.5, humidity: 0, pressure: 0, altitude: 0, updatedAt: NOW },
+          { chId: 3, kind: 4, state: 'OK', temperature: 33.2, humidity: 55.1, pressure: 0, altitude: 0, updatedAt: NOW },
+        ];
+
+        function curve() { return [{ temp: 30, spd: 30 }, { temp: 45, spd: 40 }, { temp: 60, spd: 65 }, { temp: 75, spd: 85 }, { temp: 90, spd: 100 }]; }
+
+        var SETTINGS = {
+          deviceName: 'NR_F2S4', autoConnect: true, lastAddress: '', bleKey: [],
+          hbTimeoutSec: 10, sensorEnabled: false, sensorIntervalSec: 2,
+          sensorChannels: SENSOR_CHANNELS,
+          fans: [
+            { id: 1, alias: '机箱风扇', enabled: true, tempRefs: ['t_cpu'], mode: 'auto', targetSpd: 60, speedCurve: curve(), curves: { efficient: curve(), daily: curve(), quiet: curve() }, activeCurve: 'daily', faultSpd: 50 },
+            { id: 2, alias: 'CPU 散热', enabled: true, tempRefs: ['t_cpu'], mode: 'auto', targetSpd: 30, speedCurve: curve(), curves: { efficient: curve(), daily: curve(), quiet: curve() }, activeCurve: 'daily', faultSpd: 50 },
+          ],
+          diskGroups: [
+            { id: 1, alias: '备份阵列', switchN: 1, enabled: true, autoOnline: true, disks: [{ device: '/dev/sda', alias: '数据盘 sda', serial: 'SN-A1B2C3', mounts: [{ partition: '/dev/sda1', mountPoint: '/vol1/backup' }], autoMount: true, isNvme: false }] },
+            { id: 2, alias: '冷备盘', switchN: 2, enabled: true, autoOnline: false, disks: [] },
+            { id: 3, alias: '媒体库', switchN: 3, enabled: true, autoOnline: true, disks: [{ device: '/dev/nvme0n1', alias: 'NVMe 系统盘', serial: 'SN-NVME01', mounts: [{ partition: '/dev/nvme0n1p1', mountPoint: '/vol1/media' }], autoMount: true, isNvme: true }] },
+            { id: 4, alias: '暂存组', switchN: 4, enabled: false, autoOnline: false, disks: [] },
+          ],
+          tempSensors: [
+            { id: 't_cpu', alias: 'CPU 封装', show: true, icon: 'cpu', color: '#ef4444' },
+            { id: 't_ssd', alias: 'SSD 主盘', show: true, icon: 'ssd', color: '#3b82f6' },
+            { id: 't_mem', alias: '内存条', show: true, icon: 'memory', color: '#8b5cf6' },
+          ],
+          theme: 'dark', directSaveNVS: false,
+        };
+
+        var TEMPS = [
+          { id: 't_cpu', name: 'coretemp', category: 'cpu', value: 52.3, updated: NOW, device: 'coretemp.0', model: '', serial: '', zone: 'temp1', crit: 85 },
+          { id: 't_ssd', name: 'nvme', category: 'hdd', value: 46.8, updated: NOW, device: 'nvme0n1', model: 'NVMe SSD', serial: 'SN-NVME01', zone: 'temp1', crit: 70 },
+          { id: 't_chassis', name: 'w83627ehf', category: 'other', value: 41.2, updated: NOW, device: 'w83627ehf.0', model: '', serial: '', zone: 'temp2', crit: 0 },
+          { id: 't_mem', name: 'memory', category: 'mb', value: 38.5, updated: NOW, device: 'mem0', model: '', serial: '', zone: 'temp1', crit: 0 },
+          { id: 't_mb', name: 'w83627ehf', category: 'mb', value: 35.0, updated: NOW, device: 'w83627ehf.0', model: '', serial: '', zone: 'temp1', crit: 0 },
+        ];
+
+        var DEVICE = {
+          name: 'NR_F2S4', address: 'AA:BB:CC:DD:EE:FF', rssi: -45, signalPercent: 82,
+          signalQuality: 86, connectionState: 'connected', sessionType: 'encrypted',
+          runState: 'WORK_RUN', version: '1.3.2', connectedAt: NOW,
+        };
+
+        function json(data, status) {
+          return new Response(JSON.stringify(data), { status: status || 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        var realFetch = window.fetch.bind(window);
+        window.fetch = function (url, opts) {
+          var u = String(url);
+          var p = u.replace('/app/mlnr/api', '');
+          var isGet = !opts || !opts.method || opts.method === 'GET';
+          if (isGet) {
+            if (p.indexOf('/info') === 0) return Promise.resolve(json({ app: 'mlnr', version: '1.3.2', runtime: 'go1.22', serverTime: NOW, gatewayUser: { uid: 'u1', username: 'preview', isAdmin: true, present: true } }));
+            if (p.indexOf('/status') === 0) {
+              // /status 也合并持久化设置（模拟真实后端连接后的 settings 广播）
+              var st = null;
+              try { st = JSON.parse(localStorage.getItem('mlnr_mock_settings') || 'null'); } catch (e) {}
+              var mergedSt = JSON.parse(JSON.stringify(SETTINGS));
+              if (st && Array.isArray(st.tempSensors) && st.tempSensors.length > 0) mergedSt.tempSensors = st.tempSensors;
+              if (st && Array.isArray(st.sensorChannels) && st.sensorChannels.length > 0) mergedSt.sensorChannels = st.sensorChannels;
+              if (st && Array.isArray(st.homeLayout) && st.homeLayout.length > 0) mergedSt.homeLayout = st.homeLayout;
+              return Promise.resolve(json({ device: DEVICE, fans: FANS, switches: SWITCHES, diskGroups: DISK_GROUPS, sensor: null, sensorChannels: SENSOR_READINGS, settings: mergedSt }));
+            }
+            if (p.indexOf('/settings') === 0) {
+              // 合并用户在本会话保存过的设置（模拟真实后端持久化，供联调验证）
+              var saved = null;
+              try { saved = JSON.parse(localStorage.getItem('mlnr_mock_settings') || 'null'); } catch (e) {}
+              if (saved && ((Array.isArray(saved.tempSensors) && saved.tempSensors.length > 0) || (Array.isArray(saved.sensorChannels)) || (Array.isArray(saved.homeLayout) && saved.homeLayout.length > 0))) {
+                var merged = JSON.parse(JSON.stringify(SETTINGS));
+                if (Array.isArray(saved.tempSensors) && saved.tempSensors.length > 0) merged.tempSensors = saved.tempSensors;
+                if (Array.isArray(saved.sensorChannels) && saved.sensorChannels.length > 0) merged.sensorChannels = saved.sensorChannels;
+                if (Array.isArray(saved.homeLayout) && saved.homeLayout.length > 0) merged.homeLayout = saved.homeLayout;
+                return Promise.resolve(json({ settings: merged }));
+              }
+              return Promise.resolve(json({ settings: SETTINGS }));
+            }
+            if (p.indexOf('/sensor/channels') === 0) {
+              // 返回全部通道配置（模拟真实后端：GET /sensor/channels）
+              var sv = null;
+              try { sv = JSON.parse(localStorage.getItem('mlnr_mock_settings') || 'null'); } catch (e) {}
+              var chs = (sv && Array.isArray(sv.sensorChannels) && sv.sensorChannels.length > 0) ? sv.sensorChannels : SENSOR_CHANNELS;
+              return Promise.resolve(json({ channels: chs, readings: SENSOR_READINGS }));
+            }
+            if (p.indexOf('/temperature') === 0) return Promise.resolve(json({ temps: TEMPS, time: NOW }));
+            if (p.indexOf('/logs') === 0) return Promise.resolve(json({ logs: [
+              { time: NOW, level: 'INFO', module: 'BLE', message: '蓝牙连接成功 NR_F2S4' },
+              { time: NOW, level: 'INFO', module: 'DISK', message: '硬盘组「备份阵列」上线' },
+            ], count: 2 }));
+            if (p.indexOf('/history') === 0) {
+              // 按系列名生成模拟历史（1 分钟粒度，与真实后端一致）：
+              //   temp:<ID> 温度 / fan:<N>:spd 风扇转速 / i2c:<N>:temp|humi 环境温湿度
+              var q = {};
+              var qi = u.indexOf('?');
+              if (qi >= 0) new URLSearchParams(u.slice(qi)).forEach(function (v, k) { q[k] = v; });
+              var series = q.series || '';
+              var end = Number(q.endMs) || Date.now();
+              var start = Number(q.startMs);
+              var from = q.from || '';
+              if (!start) {
+                var spanMs = from === '6h' ? 6 * 3600e3 : from === '24h' || from === '1d' ? 24 * 3600e3 : from === '7d' ? 7 * 86400e3 : from === '30d' ? 30 * 86400e3 : 3600e3;
+                start = end - spanMs;
+              }
+              if (q.customStart) start = new Date(q.customStart).getTime();
+              if (q.customEnd) end = new Date(q.customEnd).getTime();
+              if (!(end > start)) end = start + 3600e3;
+              // 系列种子：同一系列曲线稳定，不同系列各有差异
+              var seed = 0;
+              for (var si = 0; si < series.length; si++) seed = (seed * 31 + series.charCodeAt(si)) >>> 0;
+              var isHumi = series.indexOf('humi') >= 0;
+              var isSpd = series.indexOf('spd') >= 0;
+              var base = isHumi ? 48 + (seed % 250) / 10 : isSpd ? 40 + (seed % 350) / 10 : 30 + (seed % 300) / 10;
+              var amp = isHumi ? 10 : isSpd ? 16 : 7;
+              // 模拟无数据断点（验证"连续 3 分钟无数据断开"）：温度/湿度系列在最近 2 小时处断开 30 分钟
+              var gapStart = end - 2 * 3600e3;
+              var gapEnd = gapStart + 30 * 60e3;
+              var points = [];
+              for (var t = start; t <= end; t += 60e3) {
+                if (!isSpd && t >= gapStart && t <= gapEnd) continue;
+                var wob = Math.sin(t / 300e3 + seed) * amp + Math.sin(t / 900e3 + seed * 0.7) * amp * 0.35;
+                var v = Math.round((base + wob) * 10) / 10;
+                points.push({ t: t, v: v });
+              }
+              if (points.length === 0) points.push({ t: end, v: Math.round(base * 10) / 10 });
+              // 与后端一致：超过 800 点等距抽稀
+              if (points.length > 800) {
+                var stepN = Math.ceil(points.length / 800);
+                var thin = [];
+                for (var ti = 0; ti < points.length; ti += stepN) thin.push(points[ti]);
+                if (thin[thin.length - 1] !== points[points.length - 1]) thin.push(points[points.length - 1]);
+                points = thin;
+              }
+              return Promise.resolve(json({ series: series, start: start, end: end, points: points }));
+            }
+          } else {
+            if (p.indexOf('/disconnect') === 0) return Promise.resolve(json({ ok: true }));
+            if (p.indexOf('/settings') === 0) {
+              // 模拟后端保存设置：写入 localStorage 持久化，返回保存后的 settings
+              var saved = null;
+              try {
+                var bd = JSON.parse(opts.body || '{}');
+                saved = bd.settings || bd;
+              } catch (e) {}
+              if (saved) localStorage.setItem('mlnr_mock_settings', JSON.stringify(saved));
+              return Promise.resolve(json({ settings: saved || SETTINGS }));
+            }
+            // 磁盘组操作模拟：卸载/下线首次失败返回占用决策（unmount_fail_occupied），
+            // 前端弹窗后带 action(kill/force) 重试 → 成功
+            var dgm = /\/disk\/group\/(\d+)\/(poweroff|forceoff|poweron|mount|unmount)/.exec(p);
+            if (dgm) {
+              var dgBody = {};
+              try { dgBody = JSON.parse(opts.body || '{}'); } catch (e) {}
+              var dgAct = dgBody.action || '';
+              var dgDev = dgBody.device || '';
+              if ((dgm[2] === 'unmount' || dgm[2] === 'poweroff') && !dgAct) {
+                return Promise.resolve(json({ ok: false, result: {
+                  ok: false, raw: '', message: dgm[2] === 'unmount' ? (dgDev + ' 卸载失败：2 个进程正在占用') : '硬盘组卸载失败：2 个进程正在占用',
+                  decision: 'unmount_fail_occupied',
+                  occupied: [
+                    { pid: 2341, command: 'smbd', user: 'root' },
+                    { pid: 1877, command: 'nginx', user: 'www-data' },
+                  ],
+                } }));
+              }
+              var dgMsg = dgm[2] === 'unmount' ? (dgDev + ' 卸载成功') : dgm[2] === 'poweroff' ? '硬盘组已下线' : dgm[2] === 'poweron' ? '硬盘组已上线' : '指令已执行';
+              return Promise.resolve(json({ ok: true, result: { ok: true, raw: '', message: dgMsg } }));
+            }
+            // 模拟后端下发单通道配置：更新持久化的 sensorChannels[id] 并返回 ok
+            var scm = /\/sensor\/channels\/(\d+)/.exec(p);
+            if (scm) {
+              var cid = parseInt(scm[1], 10);
+              var base = null;
+              try { base = JSON.parse(localStorage.getItem('mlnr_mock_settings') || 'null'); } catch (e) {}
+              if (!base) base = JSON.parse(JSON.stringify(SETTINGS));
+              var chs = (base.sensorChannels || []).slice();
+              while (chs.length <= cid) {
+                chs.push({ id: chs.length, alias: '', kind: 0, addr: 0, enabled: false, intervalSec: 2, showTemp: false, showHumi: false, showPress: false, showAlt: false });
+              }
+              var body = {};
+              try { body = JSON.parse(opts.body || '{}'); } catch (e) {}
+              chs[cid] = Object.assign({}, chs[cid], body, { id: cid });
+              base.sensorChannels = chs;
+              localStorage.setItem('mlnr_mock_settings', JSON.stringify(base));
+              return Promise.resolve(json({ ok: true, result: { ok: true } }));
+            }
+          }
+          return realFetch(url, opts);
+        };
+
+        // 假 WebSocket：连接即推送已连接状态
+        window.WebSocket = function (url) {
+          var self = this;
+          setTimeout(function () {
+            if (self.onopen) self.onopen();
+            setTimeout(function () {
+              if (self.onmessage) {
+                self.onmessage({ data: JSON.stringify({ type: 'state_update', device: DEVICE, fans: FANS, switches: SWITCHES, diskGroups: DISK_GROUPS, sensor: null, sensorChannels: SENSOR_READINGS, time: NOW }) });
+              }
+            }, 120);
+          }, 80);
+        };
+        window.WebSocket.prototype = {
+          close: function () {},
+          send: function () {},
+        };
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

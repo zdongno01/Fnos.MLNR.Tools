@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "monitorScripts": [
+    {
+      "id": 1,
+      "name": "硬盘闲置检测",
+      "scriptType": "shell",
+      "args": "",
+      "createdAt": "2026-09-01T09:00:00+08:00",
+      "updatedAt": "2026-09-18T10:00:00+08:00"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+    ".url": {
+        "mlnr.Application": {
+            "title": "麻辣牛肉",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "",
+            "gatewayPrefix": "/app/mlnr",
+            "gatewaySocket": "app.sock",
+            "url": "/app/mlnr",
+            "allUsers": true
+        }
+    }
+}

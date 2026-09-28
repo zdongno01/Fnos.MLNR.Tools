@@ -1,0 +1,14 @@
+#!/bin/bash
+
+### This script is called after the user change environment variables in application setting page.
+### We save the latest TRIM_DATA_ACCESSIBLE_PATHS to a file so the running app
+### can pick up newly authorized directories without a full restart.
+
+OUTFILE="${TRIM_PKGVAR}/accessible_paths.env"
+if [ -n "${TRIM_PKGVAR}" ] && [ -d "${TRIM_PKGVAR}" ]; then
+    if [ -n "${TRIM_DATA_ACCESSIBLE_PATHS}" ]; then
+        echo "${TRIM_DATA_ACCESSIBLE_PATHS}" > "${OUTFILE}"
+    fi
+fi
+
+exit 0
