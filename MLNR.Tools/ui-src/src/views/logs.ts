@@ -12,7 +12,11 @@ import type { LogEntry } from '../types'
 
 // ===== 面板状态（跨渲染保留） =====
 let levelFilter = ''        // ''=全部
-let paused = false          // 暂停实时滚动
+// 查看状态：用户向下滚动离开顶部后进入，WS 自动推送停止渲染、内容静止；
+// 滚回顶部或点击右上角回到底部按钮退出，恢复自动跟随最新。
+let viewingHistory = false
+// 防抖定时器：滚动停止 200ms 后才判定进入/退出查看状态（避免惯性滚动中途误判）
+let scrollSettleTimer: number | undefined
 // #需求4：用户手动滚动离开顶部（最新日志）后，WS 推送重渲染时不再强制回顶
 let userScrolledAway = false
 let logConfig: { level: string; maxSizeMB: number; keepDays: number } | null = null
@@ -30,9 +34,18 @@ let expandedHexRows = new Set<string>()
 // 整页重建生成全新列表元素 scrollTop 归零，会把正在查看历史的用户强制拉回顶部。
 let savedScrollTop = 0
 
+// 供 main.ts 门控使用：查看状态下停止一切由 WS 推送触发的自动渲染（内容静止）
+export function isLogViewPaused(): boolean {
+  return viewingHistory
+}
+
 export function resetLogsState(): void {
-  paused = false
+  viewingHistory = false
   userScrolledAway = false
+  if (scrollSettleTimer !== undefined) {
+    clearTimeout(scrollSettleTimer)
+    scrollSettleTimer = undefined
+  }
   draft = null
   currentPage = 1
   expandedHexRows = new Set()
@@ -87,22 +100,15 @@ export function renderLogs(): HTMLElement {
   const count = el('span', { class: 'text-xs' }, [`共 ${allLogs.length} 条`])
   count.style.color = 'rgb(var(--c-ink-subtle))'
 
-  // 自动滚动开关
-  const scrollWrap = el('label', { class: 'toggle', title: '新日志到达时自动滚动到底部' })
-  const scrollInput = el('input', { type: 'checkbox' }) as HTMLInputElement
-  scrollInput.checked = !paused
-  scrollInput.onchange = () => {
-    paused = !scrollInput.checked
-    toast(paused ? '已暂停自动滚动' : '已恢复自动滚动', 'info')
-  }
-  scrollWrap.append(scrollInput, el('span', { class: 'toggle-slider' }))
-  const scrollLabel = el('span', { class: 'text-xs' }, ['自动滚动'])
-  scrollLabel.style.color = 'rgb(var(--c-ink-muted))'
-
   // 刷新
   const refreshBtn = el('button', { class: 'btn btn-sm' }, [svgIcon('refresh', 13), ' 刷新'])
   refreshBtn.onclick = async () => {
     refreshBtn.disabled = true
+    // 刷新语义=获取最新：退出查看状态并回到最新
+    clearTimeout(scrollSettleTimer)
+    scrollSettleTimer = undefined
+    viewingHistory = false
+    userScrolledAway = false
     await store.loadLogs(1000, levelFilter || undefined)
     refreshBtn.disabled = false
     currentPage = 1
@@ -127,16 +133,29 @@ export function renderLogs(): HTMLElement {
     downloadCSV(`mlnr-logs-${Date.now()}.csv`, rows)
   }
 
-  bar.append(levelSelect, count, scrollWrap, scrollLabel, refreshBtn, clearBtn, exportBtn)
+  bar.append(levelSelect, count, refreshBtn, clearBtn, exportBtn)
   wrap.appendChild(bar)
 
   // ===== 日志列表 =====
-  const list = el('div', { class: 'card p-0 overflow-hidden' })
+  const list = el('div', { class: 'card p-0 overflow-hidden relative' })
   const box = el('div', {
     id: 'log-list-box',
     class: 'overflow-y-auto px-3 py-2 font-mono',
     style: 'height: calc(100vh - 380px); min-height: 300px; font-size: 12px;',
   })
+  // 查看状态下出现在右上角的回到底部按钮（直接操作 DOM 显隐，不依赖重渲染）
+  const jumpBtn = el('button', {
+    class: 'btn btn-primary btn-sm absolute top-2 right-2',
+    style: 'display:none; z-index:20; box-shadow: 0 2px 8px rgb(0 0 0 / 0.3);',
+  }, [svgIcon('chevron-down', 14), ' 回到底部'])
+  jumpBtn.onclick = () => {
+    clearTimeout(scrollSettleTimer)
+    scrollSettleTimer = undefined
+    viewingHistory = false
+    userScrolledAway = false
+    jumpBtn.style.display = 'none'
+    document.dispatchEvent(new Event('rerender'))
+  }
 
   if (allLogs.length === 0) {
     const empty = el('div', { class: 'py-8 text-center' }, ['暂无日志'])
@@ -151,7 +170,7 @@ export function renderLogs(): HTMLElement {
       box.appendChild(renderLogRow(l))
     }
   }
-  list.appendChild(box)
+  list.append(box, jumpBtn)
   wrap.appendChild(list)
 
   // #25：分页控制栏
@@ -181,19 +200,40 @@ export function renderLogs(): HTMLElement {
   pager.append(pageInfo, pagerBtns)
   wrap.appendChild(pager)
 
-  // #需求4：跟踪用户滚动位置——离开顶部视为查看历史，重渲染时不再强制回顶；滚回顶部恢复自动跟随
+  // 跟踪用户滚动：离开顶部视为查看历史，重渲染时不再强制回顶；滚回顶部恢复自动跟随。
+  // 防抖：滚动停止 200ms 后才进入/退出查看状态（进入→内容静止+显示回到底部按钮；
+  // 手动滚回顶部→退出并刷新到最新）。box.isConnected 防止重建后旧定时器误触发。
   box.onscroll = () => {
     savedScrollTop = box.scrollTop
     if (box.scrollTop > 8) userScrolledAway = true
     else if (box.scrollTop <= 2) userScrolledAway = false
+    clearTimeout(scrollSettleTimer)
+    scrollSettleTimer = window.setTimeout(() => {
+      if (!box.isConnected) return
+      if (box.scrollTop > 8) {
+        if (!viewingHistory) {
+          viewingHistory = true
+          jumpBtn.style.display = ''
+          toast('正在查看历史日志，点击右上角回到底部按钮回到最新', 'info')
+        }
+      } else if (box.scrollTop <= 2) {
+        const wasViewing = viewingHistory
+        viewingHistory = false
+        jumpBtn.style.display = 'none'
+        if (wasViewing) {
+          // 手动滚回顶部：退出查看状态并刷新内容到最新
+          document.dispatchEvent(new Event('rerender'))
+        }
+      }
+    }, 200)
   }
 
   // 滚动位置处理：整页重建会产生全新列表元素（scrollTop 归零），若不处理会被强制拉回顶部。
-  // - 自动跟随模式（未暂停 + 第一页 + 未手动离开顶部）：保持在顶部（最新条目）
-  // - 用户正在查看历史 / 已暂停自动滚动：恢复重建前的滚动位置
-  if (!paused && currentPage === 1 && !userScrolledAway) {
+  // - 自动跟随模式（第一页 + 未查看历史）：保持在顶部（最新条目）
+  // - 用户正在查看历史 / 查看状态：恢复重建前的滚动位置
+  if (currentPage === 1 && !viewingHistory && !userScrolledAway) {
     requestAnimationFrame(() => { box.scrollTop = 0 })
-  } else if (userScrolledAway || paused) {
+  } else {
     requestAnimationFrame(() => { box.scrollTop = savedScrollTop })
   }
 
