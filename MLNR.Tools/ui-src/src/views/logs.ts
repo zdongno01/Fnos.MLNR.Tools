@@ -52,6 +52,15 @@ export function renderLogs(): HTMLElement {
     })
   }
 
+  // Fix：渲染前从当前 DOM 读取日志列表真实滚动位置（重建发生前旧列表仍在文档中），
+  // 解决刷新/WS 重建后 savedScrollTop/userScrolledAway 与真实位置脱节导致的强制回顶。
+  const oldBox = document.getElementById('log-list-box')
+  if (oldBox) {
+    savedScrollTop = oldBox.scrollTop
+    if (oldBox.scrollTop > 8) userScrolledAway = true
+    else if (oldBox.scrollTop <= 2) userScrolledAway = false
+  }
+
   const wrap = pageContainer([])
   wrap.appendChild(pageTitle('运行日志'))
 
@@ -124,6 +133,7 @@ export function renderLogs(): HTMLElement {
   // ===== 日志列表 =====
   const list = el('div', { class: 'card p-0 overflow-hidden' })
   const box = el('div', {
+    id: 'log-list-box',
     class: 'overflow-y-auto px-3 py-2 font-mono',
     style: 'height: calc(100vh - 380px); min-height: 300px; font-size: 12px;',
   })
