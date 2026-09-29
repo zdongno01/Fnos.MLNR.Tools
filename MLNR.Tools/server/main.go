@@ -110,6 +110,10 @@ func main() {
 		}
 	}
 
+	// 日志写入数据目录（@appdata/<app>/logs）：安装目录 @appcenter 在应用更新时会
+	// 重建且可能只读，日志必须落在数据目录才能持久并按"单文件上限"轮转
+	logger.SetLogDir(cfg.DataDir)
+
 	// 初始化存储
 	store := NewStore(cfg.DataDir)
 	if err := store.Load(); err != nil {

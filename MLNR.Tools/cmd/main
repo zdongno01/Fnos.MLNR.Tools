@@ -5,12 +5,59 @@
 
 LOG_FILE="${TRIM_PKGVAR}/info.log"
 PID_FILE="${TRIM_PKGVAR}/app.pid"
+LOG_CONF="${TRIM_PKGVAR}/log_config.env"
+LOG_ROTATE_PID="${TRIM_PKGVAR}/log_rotate.pid"
 APPDEST="${TRIM_APPDEST}"
 BIN="${APPDEST}/mlnr"
 SOCK="${APPDEST}/app.sock"
 
 log_msg() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"
+}
+
+# 轮转阈值（MB）读取 mlnr 写出的 log_config.env（UI"日志配置-单文件上限"联动），默认 10MB
+log_max_mb() {
+    local v=""
+    if [ -r "${LOG_CONF}" ]; then
+        v=$(sed -n 's/^MAX_LOG_MB=//p' "${LOG_CONF}" 2>/dev/null | tail -n 1 | tr -cd '0-9')
+    fi
+    if [ -z "${v}" ] || [ "${v}" -lt 1 ] || [ "${v}" -gt 1024 ]; then
+        echo 10
+    else
+        echo "${v}"
+    fi
+}
+
+# 轮转 info.log：超阈值时 复制+截断（copytruncate，进程 fd 继续写原文件），滚动保留 3 份
+rotate_info_log() {
+    [ -f "${LOG_FILE}" ] || return 0
+    local max_mb max_bytes size
+    max_mb=$(log_max_mb)
+    max_bytes=$(( max_mb * 1024 * 1024 ))
+    size=$(stat -c%s "${LOG_FILE}" 2>/dev/null || echo 0)
+    [ "${size}" -lt "${max_bytes}" ] && return 0
+    rm -f "${LOG_FILE}.3"
+    [ -f "${LOG_FILE}.2" ] && mv -f "${LOG_FILE}.2" "${LOG_FILE}.3"
+    [ -f "${LOG_FILE}.1" ] && mv -f "${LOG_FILE}.1" "${LOG_FILE}.2"
+    cp -f "${LOG_FILE}" "${LOG_FILE}.1" 2>/dev/null || return 1
+    : > "${LOG_FILE}"
+}
+
+# 后台常驻轮转循环：每 60 秒检查一次 info.log 大小，超限即轮转
+start_log_rotator() {
+    stop_log_rotator
+    ( while true; do sleep 60; rotate_info_log; done ) &
+    printf "%s" "$!" > "${LOG_ROTATE_PID}"
+}
+
+stop_log_rotator() {
+    if [ -r "${LOG_ROTATE_PID}" ]; then
+        rpid=$(head -n 1 "${LOG_ROTATE_PID}" | tr -d '[:space:]')
+        if check_process "${rpid}"; then
+            kill "${rpid}" 2>/dev/null
+        fi
+        rm -f "${LOG_ROTATE_PID}"
+    fi
 }
 
 check_process() {
@@ -53,6 +100,9 @@ start_process() {
         printf '%s' "${TRIM_DATA_ACCESSIBLE_PATHS}" > "${TRIM_PKGVAR}/accessible_paths.env"
     fi
 
+    # 启动前先轮转一次：处理历史超大 info.log（如 450MB），避免残留
+    rotate_info_log
+
     log_msg "Starting mlnr service ... (run-user=$(id -un), TRIM_RUN_USERNAME=${TRIM_RUN_USERNAME:-unset})"
     cd "${APPDEST}"
     mlnr_SOCK="${SOCK}" \
@@ -62,10 +112,12 @@ start_process() {
         "${BIN}" >> "${LOG_FILE}" 2>&1 &
     printf "%s" "$!" > "${PID_FILE}"
     log_msg "Started, pid=$!"
+    start_log_rotator
     return 0
 }
 
 stop_process() {
+    stop_log_rotator
     log_msg "Stopping mlnr service ..."
 
     if [ -r "${PID_FILE}" ]; then

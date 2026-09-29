@@ -1844,7 +1844,7 @@ func (m *BLEManager) handleNotify(data []byte) {
 			select {
 			case m.responseCh <- respFrame{seq: seq, cmdID: cmdID, payload: payload}:
 			default:
-				logger.Warn("ble", "response channel full, dropping ack seq=%d", seq)
+				logger.WarnRateLimited("ble", "resp-ch-full", 30*time.Second, "response channel full, dropping ack seq=%d", seq)
 			}
 		case bpEvtBtn:
 			m.handleButtonEvent(payload)
@@ -1870,7 +1870,7 @@ func (m *BLEManager) handleNotify(data []byte) {
 		select {
 		case m.responseCh <- respFrame{seq: seq, cmdID: cmdID, payload: payload}:
 		default:
-			logger.Warn("ble", "response channel full, dropping ack seq=%d", seq)
+			logger.WarnRateLimited("ble", "resp-ch-full", 30*time.Second, "response channel full, dropping ack seq=%d", seq)
 		}
 	case bpEvtKeCt:
 		m.handleKeCiphertextEvent(payload)

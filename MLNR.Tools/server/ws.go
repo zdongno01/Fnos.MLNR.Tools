@@ -125,14 +125,14 @@ func (h *Hub) writeLoop(client *wsClient) {
 			}
 			_ = client.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := client.conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				logger.Warn("ws", "write failed: %v", err)
+				logger.WarnRateLimited("ws", "write-failed", 30*time.Second, "write failed: %v", err)
 				_ = client.conn.Close()
 				return
 			}
 		case <-pingTicker.C:
 			_ = client.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := client.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				logger.Warn("ws", "ping failed: %v", err)
+				logger.WarnRateLimited("ws", "ping-failed", 30*time.Second, "ping failed: %v", err)
 				_ = client.conn.Close()
 				return
 			}

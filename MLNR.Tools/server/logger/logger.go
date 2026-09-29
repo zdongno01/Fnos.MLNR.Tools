@@ -39,6 +39,7 @@ var (
 	logHooks      []func(entry LogEntry)
 	fileWriter    *os.File
 	logDir        string
+	logDataDir    string // 数据目录（mlnr_DATADIR），用于持久化 log_config.env 供启动脚本轮转 info.log
 	logMaxSizeMB  int64    = 10
 	logKeepDays   int      = 7
 	logLevel      LogLevel = INFO
@@ -111,6 +112,39 @@ func SetLogConfig(maxSizeMB int64, keepDays int) {
 	defer logMutex.Unlock()
 	logMaxSizeMB = maxSizeMB
 	logKeepDays = keepDays
+	persistLogConfigLocked()
+}
+
+// persistLogConfigLocked 把当前单文件上限写入数据目录下的 log_config.env，
+// 供 cmd/main 启动脚本的 info.log 轮转循环读取（UI 配置与 stdout 日志轮转联动）。
+// 必须在持有 logMutex 时调用。
+func persistLogConfigLocked() {
+	if logDataDir == "" {
+		return
+	}
+	p := filepath.Join(logDataDir, "log_config.env")
+	content := fmt.Sprintf("MAX_LOG_MB=%d\n", logMaxSizeMB)
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		// 写配置失败不阻塞日志主流程，仅记录一次（走 stderr 可能也被重定向，静默即可）
+		return
+	}
+}
+
+// SetLogDir 设置日志根目录：生产环境传入数据目录（mlnr_DATADIR），
+// 日志写入 <dataDir>/logs/<日期>/app.log，并落盘 log_config.env。
+// dataDir 为空时回退到可执行文件所在目录（本地开发默认行为）。
+func SetLogDir(dataDir string) {
+	logMutex.Lock()
+	defer logMutex.Unlock()
+	logDataDir = dataDir
+	if dataDir != "" {
+		logDir = filepath.Join(dataDir, "logs")
+	} else {
+		logDir = filepath.Join(getAppDir(), "logs")
+	}
+	os.MkdirAll(logDir, 0o755)
+	persistLogConfigLocked()
+	rotateLogFileInternal()
 }
 
 // GetLogConfig 返回当前日志配置（级别、单文件大小上限 MB、保留天数）。
@@ -228,6 +262,27 @@ func Info(module, format string, args ...interface{}) {
 
 func Warn(module, format string, args ...interface{}) {
 	log(WARN, module, fmt.Sprintf(format, args...))
+}
+
+// 限频告警：同一 key 在 interval 内最多输出一条 WARN，用于抑制高频刷屏
+// （如 BLE 应答通道满、WS 连接断开等预期内/持续发生的场景），
+// 避免 stdout 重定向的 info.log 被瞬间灌爆。
+var (
+	rateLimitMu   sync.Mutex
+	rateLimitLast = map[string]time.Time{}
+)
+
+func WarnRateLimited(module, key string, interval time.Duration, format string, args ...interface{}) {
+	rateLimitMu.Lock()
+	now := time.Now()
+	last, ok := rateLimitLast[key]
+	if ok && now.Sub(last) < interval {
+		rateLimitMu.Unlock()
+		return
+	}
+	rateLimitLast[key] = now
+	rateLimitMu.Unlock()
+	Warn(module, format, args...)
 }
 
 func Error(module, format string, args ...interface{}) {
