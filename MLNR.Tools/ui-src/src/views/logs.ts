@@ -145,17 +145,6 @@ export function renderLogs(): HTMLElement {
     document.dispatchEvent(new Event('rerender'))
   }
 
-  // 清空显示（仅本地缓冲）
-  const clearBtn = el('button', { class: 'btn btn-sm' }, [svgIcon('trash', 13), ' 清空显示'])
-  clearBtn.onclick = () => {
-    viewingHistory = false
-    userScrolledAway = false
-    jumpToLatest = true
-    store.logs = []
-    currentPage = 1
-    document.dispatchEvent(new Event('rerender'))
-  }
-
   // 导出 CSV
   const exportBtn = el('button', { class: 'btn btn-sm' }, [svgIcon('save', 13), ' 导出 CSV'])
   exportBtn.onclick = () => {
@@ -166,7 +155,7 @@ export function renderLogs(): HTMLElement {
     downloadCSV(`mlnr-logs-${Date.now()}.csv`, rows)
   }
 
-  bar.append(levelSelect, count, refreshBtn, clearBtn, exportBtn)
+  bar.append(levelSelect, count, refreshBtn, exportBtn)
   wrap.appendChild(bar)
 
   // ===== 日志列表 =====
