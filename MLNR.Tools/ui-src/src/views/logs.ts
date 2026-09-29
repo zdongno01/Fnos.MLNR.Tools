@@ -25,6 +25,10 @@ let currentPage = 1
 const PAGE_SIZE = 100
 // #24：展开的原始二进制行索引集合（按日志唯一标识）
 let expandedHexRows = new Set<string>()
+// Fix：日志列表内部滚动位置（跨整页重建保留）——
+// WS 推送（state_update/thermal_update 等）会触发 store.subscribe 全局重渲染，
+// 整页重建生成全新列表元素 scrollTop 归零，会把正在查看历史的用户强制拉回顶部。
+let savedScrollTop = 0
 
 export function resetLogsState(): void {
   paused = false
@@ -32,6 +36,7 @@ export function resetLogsState(): void {
   draft = null
   currentPage = 1
   expandedHexRows = new Set()
+  savedScrollTop = 0
 }
 
 export function renderLogs(): HTMLElement {
@@ -166,13 +171,18 @@ export function renderLogs(): HTMLElement {
 
   // #需求4：跟踪用户滚动位置——离开顶部视为查看历史，重渲染时不再强制回顶；滚回顶部恢复自动跟随
   box.onscroll = () => {
+    savedScrollTop = box.scrollTop
     if (box.scrollTop > 8) userScrolledAway = true
     else if (box.scrollTop <= 2) userScrolledAway = false
   }
 
-  // 自动滚动到底部（仅在第一页、未暂停、且用户未手动查看历史时）
+  // 滚动位置处理：整页重建会产生全新列表元素（scrollTop 归零），若不处理会被强制拉回顶部。
+  // - 自动跟随模式（未暂停 + 第一页 + 未手动离开顶部）：保持在顶部（最新条目）
+  // - 用户正在查看历史 / 已暂停自动滚动：恢复重建前的滚动位置
   if (!paused && currentPage === 1 && !userScrolledAway) {
     requestAnimationFrame(() => { box.scrollTop = 0 })
+  } else if (userScrolledAway || paused) {
+    requestAnimationFrame(() => { box.scrollTop = savedScrollTop })
   }
 
   // ===== 日志配置卡片 =====
