@@ -396,7 +396,14 @@ function boot(): void {
     render()
   })
 
-  window.addEventListener('resize', () => render())
+  // Fix：软键盘弹出会触发 window resize（Android 上打开键盘时布局视口收缩），
+  // 若此时整页重建 #app 会销毁聚焦的输入框 → 输入失焦 → 软键盘立即收起。
+  // 与 store.subscribe / focusout 相同的输入框守卫：编辑期间跳过渲染，键盘收起后再恢复渲染。
+  window.addEventListener('resize', () => {
+    const ae = document.activeElement
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return
+    render()
+  })
 
   forceRender()
 
