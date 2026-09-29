@@ -33,6 +33,9 @@ let expandedHexRows = new Set<string>()
 // WS 推送（state_update/thermal_update 等）会触发 store.subscribe 全局重渲染，
 // 整页重建生成全新列表元素 scrollTop 归零，会把正在查看历史的用户强制拉回顶部。
 let savedScrollTop = 0
+// 回到顶部/刷新/清空等回到最新操作的意图标志：本次渲染强制滚动到顶部，
+// 并跳过渲染前从旧 DOM 捕获滚动位置（否则会把位置拉回点击前的历史位置）
+let jumpToLatest = false
 
 // 供 main.ts 门控使用：查看状态下停止一切由 WS 推送触发的自动渲染（内容静止）
 export function isLogViewPaused(): boolean {
@@ -40,6 +43,7 @@ export function isLogViewPaused(): boolean {
 }
 
 export function resetLogsState(): void {
+  jumpToLatest = false
   viewingHistory = false
   userScrolledAway = false
   if (scrollSettleTimer !== undefined) {
@@ -68,7 +72,7 @@ export function renderLogs(): HTMLElement {
   // Fix：渲染前从当前 DOM 读取日志列表真实滚动位置（重建发生前旧列表仍在文档中），
   // 解决刷新/WS 重建后 savedScrollTop/userScrolledAway 与真实位置脱节导致的强制回顶。
   const oldBox = document.getElementById('log-list-box')
-  if (oldBox) {
+  if (oldBox && !jumpToLatest) {
     savedScrollTop = oldBox.scrollTop
     if (oldBox.scrollTop > 8) userScrolledAway = true
     else if (oldBox.scrollTop <= 2) userScrolledAway = false
@@ -109,6 +113,7 @@ export function renderLogs(): HTMLElement {
     scrollSettleTimer = undefined
     viewingHistory = false
     userScrolledAway = false
+    jumpToLatest = true
     await store.loadLogs(1000, levelFilter || undefined)
     refreshBtn.disabled = false
     currentPage = 1
@@ -118,6 +123,9 @@ export function renderLogs(): HTMLElement {
   // 清空显示（仅本地缓冲）
   const clearBtn = el('button', { class: 'btn btn-sm' }, [svgIcon('trash', 13), ' 清空显示'])
   clearBtn.onclick = () => {
+    viewingHistory = false
+    userScrolledAway = false
+    jumpToLatest = true
     store.logs = []
     currentPage = 1
     document.dispatchEvent(new Event('rerender'))
@@ -143,16 +151,17 @@ export function renderLogs(): HTMLElement {
     class: 'overflow-y-auto px-3 py-2 font-mono',
     style: 'height: calc(100vh - 380px); min-height: 300px; font-size: 12px;',
   })
-  // 查看状态下出现在右上角的回到底部按钮（直接操作 DOM 显隐，不依赖重渲染）
+  // 查看状态下出现在右上角的回到顶部按钮（直接操作 DOM 显隐，不依赖重渲染）
   const jumpBtn = el('button', {
-    class: 'btn btn-primary btn-sm absolute top-2 right-2',
-    style: 'display:none; z-index:20; box-shadow: 0 2px 8px rgb(0 0 0 / 0.3);',
-  }, [svgIcon('chevron-down', 14), ' 回到底部'])
+    class: 'btn btn-primary absolute top-2 right-2',
+    style: 'display:none; z-index:20; box-shadow: 0 2px 8px rgb(0 0 0 / 0.3); font-size: 16px;',
+  }, [svgIcon('chevron-up', 14), ' 回到顶部'])
   jumpBtn.onclick = () => {
     clearTimeout(scrollSettleTimer)
     scrollSettleTimer = undefined
     viewingHistory = false
     userScrolledAway = false
+    jumpToLatest = true
     jumpBtn.style.display = 'none'
     document.dispatchEvent(new Event('rerender'))
   }
@@ -231,7 +240,8 @@ export function renderLogs(): HTMLElement {
   // 滚动位置处理：整页重建会产生全新列表元素（scrollTop 归零），若不处理会被强制拉回顶部。
   // - 自动跟随模式（第一页 + 未查看历史）：保持在顶部（最新条目）
   // - 用户正在查看历史 / 查看状态：恢复重建前的滚动位置
-  if (currentPage === 1 && !viewingHistory && !userScrolledAway) {
+  if (jumpToLatest || (currentPage === 1 && !viewingHistory && !userScrolledAway)) {
+    jumpToLatest = false
     requestAnimationFrame(() => { box.scrollTop = 0 })
   } else {
     requestAnimationFrame(() => { box.scrollTop = savedScrollTop })
