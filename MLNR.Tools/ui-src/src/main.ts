@@ -34,7 +34,7 @@ import { renderFanSettings, resetFanSettingsState } from './views/fan-settings'
 import { renderDiskSettings, resetDiskSettingsState } from './views/disk-settings'
 import { renderConnection, closeScanOverlay } from './views/connection'
 import { renderConnectionConfig, resetConnectionConfigState } from './views/connection-config'
-import { renderLogs, resetLogsState, isLogViewPaused } from './views/logs'
+import { renderLogs, resetLogsState, isLogAutoFollow } from './views/logs'
 import { renderTempSensorConfigPage, renderI2cSensorConfigPage, resetSensorConfigState } from './views/sensor-config'
 import { renderSchedules, resetSchedulesState } from './views/schedules'
 import { renderScheduleForm, resetScheduleFormState } from './views/schedules'
@@ -407,8 +407,8 @@ function boot(): void {
     }
     // Fix：日志相关页面忽略无关推送（日志未变且连接/后端/落盘状态未变 → 不渲染）
     if (isLogsRoute()) {
-      // 查看状态：用户正在翻阅历史，WS 推送一律不渲染（内容静止），直到回到最新
-      if (isLogViewPaused()) return
+      // 自动跟随状态（第一页 + 未查看历史）才随 WS 推送实时渲染；查看历史/翻页时内容静止
+      if (!isLogAutoFollow()) return
       const d = store.device
       const logChanged = store.logVersion !== prevLogVersion
       const connChanged = d?.connectionState !== prevDevState || d?.sessionType !== prevSess || d?.runState !== prevRun

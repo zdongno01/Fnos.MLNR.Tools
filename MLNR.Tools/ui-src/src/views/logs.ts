@@ -37,12 +37,37 @@ let savedScrollTop = 0
 // 并跳过渲染前从旧 DOM 捕获滚动位置（否则会把位置拉回点击前的历史位置）
 let jumpToLatest = false
 
-// 供 main.ts 门控使用：查看状态下停止一切由 WS 推送触发的自动渲染（内容静止）
-export function isLogViewPaused(): boolean {
-  return viewingHistory
+// 供 main.ts 门控使用：仅第一页且未查看历史的自动跟随状态才随 WS 推送实时渲染；
+// 查看历史或翻页时内容静止（主动操作仍通过 rerender 事件渲染）。
+export function isLogAutoFollow(): boolean {
+  return currentPage === 1 && !viewingHistory
+}
+
+// 自动跟随状态的实时轮询：仅第一页且未查看历史时拉取最新日志（第一页实时更新最新条目）。
+// 查看历史 / 翻页时停止轮询，内容静止。
+let pollTimer: number | undefined
+const POLL_INTERVAL = 3000
+function startPolling(): void {
+  if (pollTimer !== undefined) return
+  pollTimer = window.setInterval(async () => {
+    if (!document.getElementById('log-list-box')) return
+    if (viewingHistory || currentPage !== 1) return
+    try {
+      await store.loadLogs(1000, levelFilter || undefined)
+    } catch {
+      // 轮询失败静默，下一轮重试
+    }
+  }, POLL_INTERVAL)
+}
+function stopPolling(): void {
+  if (pollTimer !== undefined) {
+    clearInterval(pollTimer)
+    pollTimer = undefined
+  }
 }
 
 export function resetLogsState(): void {
+  stopPolling()
   jumpToLatest = false
   viewingHistory = false
   userScrolledAway = false
@@ -222,8 +247,11 @@ export function renderLogs(): HTMLElement {
       if (box.scrollTop > 8) {
         if (!viewingHistory) {
           viewingHistory = true
-          jumpBtn.style.display = ''
-          toast('正在查看历史日志，点击右上角回到底部按钮回到最新', 'info')
+          stopPolling() // 查看历史：停止实时轮询
+          if (currentPage === 1) {
+            jumpBtn.style.display = ''
+            toast('正在查看历史日志，点击右上角回到顶部按钮回到最新', 'info')
+          }
         }
       } else if (box.scrollTop <= 2) {
         const wasViewing = viewingHistory
@@ -246,6 +274,10 @@ export function renderLogs(): HTMLElement {
   } else {
     requestAnimationFrame(() => { box.scrollTop = savedScrollTop })
   }
+
+  // 自动跟随（第一页 + 未查看历史）才实时轮询最新日志；翻页/查看历史停止轮询
+  if (currentPage === 1 && !viewingHistory) startPolling()
+  else stopPolling()
 
   // ===== 日志配置卡片 =====
   if (logConfig) {
