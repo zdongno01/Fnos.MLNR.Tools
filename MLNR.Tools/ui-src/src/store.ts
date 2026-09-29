@@ -47,6 +47,8 @@ class Store {
   thermal: ThermalSnapshot | null = null
   /** 日志环形缓冲（API 拉取 + WS 实时推送合并） */
   logs: LogEntry[] = []
+  /** 日志数据版本号：每次日志新增/重载自增，供视图层判断"日志是否真的变了"（Fix：避免无关推送触发日志页整页重建） */
+  logVersion = 0
   /** 固件 Debug 模式（CFG GLOBAL DEBUG_MODE；决定技术字段是否显示） */
   debugMode: boolean = false
 
@@ -177,6 +179,7 @@ class Store {
     try {
       const r = await api.getLogs(count, level, history)
       this.logs = r.logs ?? []
+      this.logVersion++
       this.backendOnline = true
       this.notify()
     } catch (e) {
@@ -453,6 +456,7 @@ class Store {
     if (this.logs.length > 500) {
       this.logs.splice(0, this.logs.length - 500)
     }
+    this.logVersion++
     this.notify()
   }
 

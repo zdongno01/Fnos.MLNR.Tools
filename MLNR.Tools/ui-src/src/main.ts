@@ -380,6 +380,18 @@ function boot(): void {
     }, 150)
   })
 
+  // 日志相关页面（运行日志 / 计划任务-日志事件）：只对日志数据或连接状态变化渲染，
+  // 忽略 thermal_update/state_update 等无关推送触发的整页重建 —— 否则每次推送都会重建列表 DOM，
+  // 把正在查看历史的用户强制拉回顶部（scrollTop 归零）。
+  let prevLogVersion = store.logVersion
+  let prevDevState = store.device?.connectionState
+  let prevSess = store.device?.sessionType
+  let prevRun = store.device?.runState
+  let prevBackend = store.backendOnline
+  let prevNvs = store.pendingNvsSave
+  const isLogsRoute = () => currentRoute.name === 'logs'
+    || (currentRoute.name === 'schedules' && currentRoute.sub === 'logs')
+
   store.subscribe(() => {
     const ae = document.activeElement
     // 输入框中正在编辑：跳过 render，防止失焦触发整页重建导致点击丢失
@@ -393,6 +405,20 @@ function boot(): void {
     } catch {
       // ignore selection check errors
     }
+    // Fix：日志相关页面忽略无关推送（日志未变且连接/后端/落盘状态未变 → 不渲染）
+    if (isLogsRoute()) {
+      const d = store.device
+      const logChanged = store.logVersion !== prevLogVersion
+      const connChanged = d?.connectionState !== prevDevState || d?.sessionType !== prevSess || d?.runState !== prevRun
+      const stateChanged = store.backendOnline !== prevBackend || store.pendingNvsSave !== prevNvs
+      if (!logChanged && !connChanged && !stateChanged) return
+    }
+    prevLogVersion = store.logVersion
+    prevDevState = store.device?.connectionState
+    prevSess = store.device?.sessionType
+    prevRun = store.device?.runState
+    prevBackend = store.backendOnline
+    prevNvs = store.pendingNvsSave
     render()
   })
 

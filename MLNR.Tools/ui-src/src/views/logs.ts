@@ -47,6 +47,8 @@ export function renderLogs(): HTMLElement {
       logConfig = c
       configLoaded = true
       draft = c ? { level: c.level, maxSize: String(c.maxSizeMB) } : null
+      // Fix：日志页已忽略无关 store 推送，配置加载完成后需显式触发渲染以显示配置卡片
+      document.dispatchEvent(new Event('rerender'))
     })
   }
 
