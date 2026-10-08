@@ -250,6 +250,8 @@ class ServerCb : public BLEServerCallbacks{
     // 断开只清内存会话密钥（NVS 密钥保留，重连直接恢复加密会话）
     secClearSessionKeyMemory();
     keReset();
+    // 清除残留的加载标志（极端时序下 secTask 可能还没来得及消费就断开了）
+    g_need_load_auth = false;
     // WORK_RUN下连接断开 → 回到WORK_WAIT等待授权设备
     if(g_dev_state == STATE_WORK_RUN) appStateSet(STATE_WORK_WAIT);
     // 断开连接：重启广播等待授权设备
@@ -292,6 +294,18 @@ static void secTask(void* arg)
       continue;
     }
     esp_task_wdt_reset();
+
+    // 修复 M3 竞态: onConnect(btc 线程)仅置 g_need_load_auth=true, 原设计依赖 loop
+    // 线程(优先级1)异步执行 secLoadAuth()。但 secTask 优先级(2)更高, 当上位机
+    // 在 HELLO 之后迅速发送加密 PING 时, secTask 可能在 loop 还没执行 secLoadAuth
+    // 时就处理了 PING 帧, 此时 secSessionEnabled() 返回 false → 明文分支拒绝 PING
+    // (SEC_REQUIRED), 上位机收到明文帧后用密钥解密失败 → 握手超时。
+    // 将 secLoadAuth() 放入 secTask 主循环(24KB 栈足够 NVS 读), 保证任何帧处理
+    // 之前密钥已从 NVS 加载到内存, 消除调度顺序依赖。
+    if(g_need_load_auth){
+      g_need_load_auth = false;
+      secLoadAuth();
+    }
 
     // 取一条挂起帧
     uint8_t buf[CMD_BUF_MAX_LEN];

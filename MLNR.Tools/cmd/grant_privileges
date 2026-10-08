@@ -2,7 +2,7 @@
 # mlnr 特权命令授权公共脚本（被 install_callback / upgrade_callback source 调用）
 # 作用：
 #   1) 写入 /etc/sudoers.d/mlnr NOPASSWD 白名单 —— 后端 disk.go 的 privRun()
-#      在非 root 运行时会自动通过 `sudo -n` 调用 mount/umount/hdparm，无需交互；
+#      在非 root 运行时会自动通过 `sudo -n` 调用 mount/umount/hdparm/fuser，无需交互；
 #   2) smartctl / nvme 加 setuid —— 温度采集只读命令，非 root 运行时也能读取磁盘温度。
 
 APP_USER="${TRIM_USERNAME:-mlnr}"
@@ -12,7 +12,7 @@ SUDOERS_FILE="/etc/sudoers.d/mlnr"
 # 路径覆盖 server/syscmd.go findTool 的全部候选（/usr/bin /bin /usr/sbin /sbin /usr/local/bin）
 cat > "${SUDOERS_FILE}" <<EOF
 # mlnr: allow app user to run privileged disk commands without password
-${APP_USER} ALL=(root) NOPASSWD: /bin/mount, /usr/bin/mount, /sbin/umount, /usr/bin/umount, /sbin/hdparm, /usr/sbin/hdparm
+${APP_USER} ALL=(root) NOPASSWD: /bin/mount, /usr/bin/mount, /sbin/umount, /usr/bin/umount, /sbin/hdparm, /usr/sbin/hdparm, /bin/fuser, /usr/bin/fuser
 EOF
 chown root:root "${SUDOERS_FILE}"
 chmod 0440 "${SUDOERS_FILE}"

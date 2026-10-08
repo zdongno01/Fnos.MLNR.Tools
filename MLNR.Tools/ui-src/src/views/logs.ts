@@ -239,7 +239,7 @@ export function renderLogs(): HTMLElement {
           stopPolling() // 查看历史：停止实时轮询
           if (currentPage === 1) {
             jumpBtn.style.display = ''
-            toast('正在查看历史日志，点击右上角回到顶部按钮回到最新', 'info')
+            // toast('正在查看历史日志，点击右上角回到顶部按钮回到最新', 'info')
           }
         }
       } else if (box.scrollTop <= 2) {

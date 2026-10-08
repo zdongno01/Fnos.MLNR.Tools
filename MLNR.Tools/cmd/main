@@ -15,6 +15,13 @@ log_msg() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"
 }
 
+# 将错误信息写入系统日志文件，供 fnOS 前端以 Dialog 形式展示给用户（V1.1.8+）
+report_err() {
+    if [ -n "${TRIM_TEMP_LOGFILE}" ]; then
+        echo "$1" > "${TRIM_TEMP_LOGFILE}"
+    fi
+}
+
 # 轮转阈值（MB）读取 mlnr 写出的 log_config.env（UI"日志配置-单文件上限"联动），默认 10MB
 log_max_mb() {
     local v=""
@@ -89,6 +96,7 @@ start_process() {
 
     if [ ! -x "${BIN}" ]; then
         log_msg "Binary not found or not executable: ${BIN}"
+        report_err "mlnr 启动失败：可执行文件不存在或不可执行（${BIN}），请重新安装应用或联系维护者。"
         return 1
     fi
 
@@ -155,7 +163,7 @@ stop_process() {
 
 case $1 in
 start)
-    start_process
+    start_process || exit 1
     ;;
 stop)
     stop_process

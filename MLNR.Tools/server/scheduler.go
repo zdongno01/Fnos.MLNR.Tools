@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -862,7 +861,8 @@ func (s *Scheduler) execDiskGroupControl(e Executor) (string, []string) {
 	return "", []string{"硬盘组控制动作无效"}
 }
 
-// killDiskOccupiers kill-9 终止占用硬盘组挂载点的进程（Linux fuser；非 Linux 返回错误）。
+// killDiskOccupiers 向占用硬盘组挂载点的进程发送 SIGKILL（Linux fuser -km）。
+// fuser 不可用（非 Linux 或未安装）时跳过该挂载点并记录警告；仅在硬盘组不存在时返回错误。
 func (s *Scheduler) killDiskOccupiers(groupID int) error {
 	set := s.store.GetSettings()
 	for _, g := range set.DiskGroups {
@@ -874,8 +874,13 @@ func (s *Scheduler) killDiskOccupiers(groupID int) error {
 				if m.MountPoint == "" {
 					continue
 				}
-				cmd := exec.Command("fuser", "-km", m.MountPoint)
-				if out, err := cmd.CombinedOutput(); err != nil {
+				fuser := findFuser()
+				if fuser == "" {
+					logger.Warn("disk", "kill occupiers %s: fuser not found", m.MountPoint)
+					continue
+				}
+				out, err := privRun(fuser, 15*time.Second, "-km", m.MountPoint)
+				if err != nil {
 					logger.Warn("disk", "kill occupiers %s: %s (%v)", m.MountPoint, strings.TrimSpace(string(out)), err)
 				}
 			}

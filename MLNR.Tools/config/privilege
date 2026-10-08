@@ -1,7 +1,6 @@
 {
-  "root": true,
   "defaults": {
-    "run-as": "root"
+    "run-as": "package"
   },
   "username": "mlnr",
   "groupname": "mlnr"
