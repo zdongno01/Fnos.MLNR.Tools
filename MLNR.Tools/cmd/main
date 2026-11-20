@@ -10,6 +10,10 @@ LOG_ROTATE_PID="${TRIM_PKGVAR}/log_rotate.pid"
 APPDEST="${TRIM_APPDEST}"
 BIN="${APPDEST}/mlnr"
 SOCK="${APPDEST}/app.sock"
+CMD_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+# 生命周期脚本以 root 运行（run-as=root），长期服务进程降权到包用户运行
+RUN_USER="${TRIM_USERNAME:-mlnr}"
+RUN_GROUP="${TRIM_GROUPNAME:-${RUN_USER}}"
 
 log_msg() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"
@@ -20,6 +24,53 @@ report_err() {
     if [ -n "${TRIM_TEMP_LOGFILE}" ]; then
         echo "$1" > "${TRIM_TEMP_LOGFILE}"
     fi
+}
+
+# 定位 runuser（util-linux）
+find_runuser() {
+    local p
+    for p in /usr/sbin/runuser /usr/bin/runuser /sbin/runuser /bin/runuser; do
+        if [ -x "${p}" ]; then
+            printf '%s' "${p}"
+            return 0
+        fi
+    done
+    command -v runuser 2>/dev/null && return 0
+    return 1
+}
+
+# 每次启动都自愈一次特权授权（系统升级/应用更新可能清掉 /etc/sudoers.d/mlnr）
+ensure_privileges() {
+    [ "$(id -u)" -eq 0 ] || return 0
+    local c
+    for c in \
+        "${CMD_DIR}/grant_privileges" \
+        "${TRIM_APPDEST%/target}/cmd/grant_privileges" \
+        "/var/apps/${TRIM_APPNAME:-mlnr}/cmd/grant_privileges"; do
+        if [ -r "${c}" ]; then
+            # shellcheck disable=SC1090
+            source "${c}"
+            return 0
+        fi
+    done
+    report_err "未找到 grant_privileges 脚本，无法自动配置 sudoers 白名单（挂载/卸载将因缺少 root 权限失败）"
+    return 0
+}
+
+# root 生命周期脚本启动时把安装/数据目录交还给包用户：
+# 服务进程以包用户运行，需能创建 app.sock 并写日志与配置
+prepare_dir_perms() {
+    [ "$(id -u)" -eq 0 ] || return 0
+    if ! id -u "${RUN_USER}" >/dev/null 2>&1; then
+        report_err "未找到包用户 ${RUN_USER}，服务将以 root 运行；请在 config/privilege 中保留 username/groupname"
+        return 0
+    fi
+    [ -n "${TRIM_PKGVAR}" ] && [ -d "${TRIM_PKGVAR}" ] && chown -R "${RUN_USER}:${RUN_GROUP}" "${TRIM_PKGVAR}" 2>/dev/null
+    # 仅改目录属主（socket 创建需要目录写权限），不递归改安装目录
+    chown "${RUN_USER}:${RUN_GROUP}" "${APPDEST}" 2>/dev/null
+    chmod 0755 "${BIN}" 2>/dev/null
+    chmod -R a+rX "${APPDEST}/ui" 2>/dev/null
+    return 0
 }
 
 # 轮转阈值（MB）读取 mlnr 写出的 log_config.env（UI"日志配置-单文件上限"联动），默认 10MB
@@ -111,13 +162,30 @@ start_process() {
     # 启动前先轮转一次：处理历史超大 info.log（如 450MB），避免残留
     rotate_info_log
 
-    log_msg "Starting mlnr service ... (run-user=$(id -un), TRIM_RUN_USERNAME=${TRIM_RUN_USERNAME:-unset})"
+    log_msg "Starting mlnr service ... (script-user=$(id -un), TRIM_RUN_USERNAME=${TRIM_RUN_USERNAME:-unset}, service-user=${RUN_USER})"
     cd "${APPDEST}"
-    mlnr_SOCK="${SOCK}" \
-    mlnr_UIDIR="${APPDEST}/ui" \
-    mlnr_DATADIR="${TRIM_PKGVAR}" \
-    TRIM_DATA_ACCESSIBLE_PATHS="${TRIM_DATA_ACCESSIBLE_PATHS}" \
-        "${BIN}" >> "${LOG_FILE}" 2>&1 &
+
+    # 特权授权自愈（sudoers 白名单 + smartctl setuid）+ 目录属主交还包用户
+    ensure_privileges
+    prepare_dir_perms
+
+    # 以包用户运行长期服务（生命周期脚本本身是 root，不把 root 暴露给 HTTP/BLE 进程）；
+    # 特权命令由服务进程通过 sudo -n 白名单调用（见 server/syscmd.go privRun）。
+    RUNUSER_BIN="$(find_runuser 2>/dev/null)"
+    if [ "$(id -u)" -eq 0 ] && [ -n "${RUNUSER_BIN}" ] && id -u "${RUN_USER}" >/dev/null 2>&1; then
+        "${RUNUSER_BIN}" -u "${RUN_USER}" -- env \
+        mlnr_SOCK="${SOCK}" \
+        mlnr_UIDIR="${APPDEST}/ui" \
+        mlnr_DATADIR="${TRIM_PKGVAR}" \
+        TRIM_DATA_ACCESSIBLE_PATHS="${TRIM_DATA_ACCESSIBLE_PATHS}" \
+            "${BIN}" >> "${LOG_FILE}" 2>&1 &
+    else
+        mlnr_SOCK="${SOCK}" \
+        mlnr_UIDIR="${APPDEST}/ui" \
+        mlnr_DATADIR="${TRIM_PKGVAR}" \
+        TRIM_DATA_ACCESSIBLE_PATHS="${TRIM_DATA_ACCESSIBLE_PATHS}" \
+            "${BIN}" >> "${LOG_FILE}" 2>&1 &
+    fi
     printf "%s" "$!" > "${PID_FILE}"
     log_msg "Started, pid=$!"
     start_log_rotator

@@ -2,8 +2,37 @@
 
 ### This script is called after the user installs the application.
 
+# 定位 cmd 目录下的公共授权脚本（fnOS 可能把生命周期脚本单独落到临时目录，
+# 因此除 dirname($0) 外再按应用目录回退查找）
+load_grant_privileges() {
+    local c
+    for c in \
+        "$(dirname "$0")/grant_privileges" \
+        "${TRIM_APPDEST%/target}/cmd/grant_privileges" \
+        "/var/apps/${TRIM_APPNAME:-mlnr}/cmd/grant_privileges"; do
+        if [ -r "${c}" ]; then
+            # shellcheck disable=SC1090
+            source "${c}"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # 自动授权特权命令（sudoers 白名单 + smartctl/nvme setuid）
-# 详见 grant_privileges
-source "$(dirname "$0")/grant_privileges"
+# 生命周期脚本以 root 运行（config/privilege: run-as=root），因此可以写 /etc/sudoers.d
+if ! load_grant_privileges; then
+    if [ -n "${TRIM_TEMP_LOGFILE}" ]; then
+        echo "mlnr 特权授权失败：未找到 grant_privileges 脚本（sudoers 白名单未写入）" >> "${TRIM_TEMP_LOGFILE}"
+    fi
+fi
+
+# 服务进程由 cmd/main 通过 runuser 降权到包用户运行，
+# 这里先把数据目录交还给包用户，否则降权后无法写日志/设置
+APP_RUN_USER="${TRIM_USERNAME:-mlnr}"
+APP_RUN_GROUP="${TRIM_GROUPNAME:-${APP_RUN_USER}}"
+if [ -d "${TRIM_PKGVAR}" ] && id -u "${APP_RUN_USER}" >/dev/null 2>&1; then
+    chown -R "${APP_RUN_USER}:${APP_RUN_GROUP}" "${TRIM_PKGVAR}" 2>/dev/null
+fi
 
 exit 0

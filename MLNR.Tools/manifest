@@ -1,5 +1,5 @@
 appname=mlnr
-version=0.1.0
+version=0.1.3
 display_name=麻辣牛肉
 desc=这是一个通过蓝牙连接到麻辣牛肉控制板的风扇控制与硬盘电源管理工具。安装时已自动配置特权命令权限（mount/umount/hdparm sudo 白名单与 smartctl/nvme 温度读取 setuid），无需手动授权.
 platform=x86

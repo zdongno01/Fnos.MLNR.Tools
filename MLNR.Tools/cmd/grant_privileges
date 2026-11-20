@@ -1,37 +1,151 @@
 #!/bin/bash
-# mlnr 特权命令授权公共脚本（被 install_callback / upgrade_callback source 调用）
+# mlnr 特权命令授权公共脚本
+# 被 install_callback / upgrade_callback / cmd/main（start）source 调用。
+#
+# 前提：生命周期脚本以 root 运行（config/privilege 中 run-as=root）。
+# 服务进程由 cmd/main 用 runuser 降权到包用户，因此这里把白名单授予「包用户」。
+#
 # 作用：
-#   1) 写入 /etc/sudoers.d/mlnr NOPASSWD 白名单 —— 后端 disk.go 的 privRun()
-#      在非 root 运行时会自动通过 `sudo -n` 调用 mount/umount/hdparm/fuser，无需交互；
+#   1) 写入 /etc/sudoers.d/mlnr NOPASSWD 白名单 —— server/syscmd.go 的 privRun()
+#      在非 root 运行时会通过 `sudo -n` 调用 mount/umount/hdparm/fuser，无需交互；
 #   2) smartctl / nvme 加 setuid —— 温度采集只读命令，非 root 运行时也能读取磁盘温度。
+#
+# 重要：早期版本以 run-as=package 运行，本脚本实际上以包用户执行，
+# /etc/sudoers.d 写入与 chmod u+s 全部静默失败（脚本仍 exit 0），
+# 导致运行期 `sudo -n` 报 "sudo: a password is required"。
+# 因此这里改为：每一步都检查返回值，失败写入 TRIM_TEMP_LOGFILE（应用中心弹窗）与 info.log。
 
 APP_USER="${TRIM_USERNAME:-mlnr}"
-SUDOERS_FILE="/etc/sudoers.d/mlnr"
+APP_GROUP="${TRIM_GROUPNAME:-${APP_USER}}"
+SUDOERS_DIR="/etc/sudoers.d"
+SUDOERS_FILE="${SUDOERS_DIR}/mlnr"
+MAIN_SUDOERS="/etc/sudoers"
+PKGVAR="${TRIM_PKGVAR:-}"
 
-# ---- 1) sudoers NOPASSWD 白名单 ----
-# 路径覆盖 server/syscmd.go findTool 的全部候选（/usr/bin /bin /usr/sbin /sbin /usr/local/bin）
-cat > "${SUDOERS_FILE}" <<EOF
-# mlnr: allow app user to run privileged disk commands without password
-${APP_USER} ALL=(root) NOPASSWD: /bin/mount, /usr/bin/mount, /sbin/umount, /usr/bin/umount, /sbin/hdparm, /usr/sbin/hdparm, /bin/fuser, /usr/bin/fuser
-EOF
-chown root:root "${SUDOERS_FILE}"
-chmod 0440 "${SUDOERS_FILE}"
+# 允许的命令路径：覆盖 server/syscmd.go findTool 的全部候选（/usr/bin /bin /usr/sbin /sbin）
+ALLOW_CMDS="/usr/bin/mount, /bin/mount, /usr/sbin/mount, /sbin/mount, \
+/usr/bin/umount, /bin/umount, /usr/sbin/umount, /sbin/umount, \
+/usr/sbin/hdparm, /sbin/hdparm, /usr/bin/hdparm, \
+/usr/bin/fuser, /bin/fuser, /usr/sbin/fuser, /sbin/fuser, \
+/usr/bin/smartctl, /usr/sbin/smartctl, /usr/bin/nvme, /usr/sbin/nvme, \
+/usr/sbin/modprobe, /usr/bin/modprobe"
 
-# 校验 sudoers 语法；失败则回退移除（避免损坏系统 sudo 配置）
-if command -v visudo >/dev/null 2>&1; then
-    if ! visudo -c -f "${SUDOERS_FILE}" >/dev/null 2>&1; then
-        rm -f "${SUDOERS_FILE}"
-        echo "mlnr: sudoers config invalid, removed ${SUDOERS_FILE}" >> "${TRIM_TEMP_LOGFILE:-/dev/null}"
+log_msg() {
+    if [ -n "${PKGVAR}" ] && [ -d "${PKGVAR}" ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - [priv] $1" >> "${PKGVAR}/info.log" 2>/dev/null
     fi
-fi
+    return 0
+}
 
-# ---- 2) smartctl / nvme setuid（温度采集） ----
-for b in smartctl nvme; do
-    for p in /usr/sbin/${b} /usr/bin/${b} /sbin/${b} /bin/${b}; do
-        if [ -x "${p}" ]; then
-            chmod u+s "${p}" 2>/dev/null
-        fi
+# 用户可见的失败原因：写入 fnOS 提供的临时日志文件（应用中心以弹窗展示）
+report_err() {
+    log_msg "$1"
+    if [ -n "${TRIM_TEMP_LOGFILE}" ]; then
+        echo "$1" >> "${TRIM_TEMP_LOGFILE}" 2>/dev/null
+    fi
+}
+
+# sudoers 主体内容
+sudoers_body() {
+    cat <<EOF
+# mlnr: 允许包用户免密执行磁盘挂载/卸载/停转与温度读取（自动生成，请勿手改）
+Defaults:${APP_USER} !requiretty
+${APP_USER} ALL=(root) NOPASSWD: ${ALLOW_CMDS}
+EOF
+}
+
+# 确保 /etc/sudoers include 了 /etc/sudoers.d（否则白名单文件不会生效）
+ensure_includedir() {
+    [ -r "${MAIN_SUDOERS}" ] || return 1
+    grep -Eq '^(#includedir|@includedir)[[:space:]]+/etc/sudoers\.d' "${MAIN_SUDOERS}" 2>/dev/null && return 0
+    cp -p "${MAIN_SUDOERS}" "${MAIN_SUDOERS}.mlnr.bak" 2>/dev/null || return 1
+    printf '\n#includedir /etc/sudoers.d\n' >> "${MAIN_SUDOERS}" 2>/dev/null || {
+        cp -p "${MAIN_SUDOERS}.mlnr.bak" "${MAIN_SUDOERS}" 2>/dev/null
+        return 1
+    }
+    if command -v visudo >/dev/null 2>&1 && ! visudo -c >/dev/null 2>&1; then
+        cp -p "${MAIN_SUDOERS}.mlnr.bak" "${MAIN_SUDOERS}" 2>/dev/null
+        return 1
+    fi
+    log_msg "/etc/sudoers 缺少 include，已追加 #includedir /etc/sudoers.d"
+    return 0
+}
+
+# 写入白名单并校验是否真正生效
+grant_sudoers() {
+    if ! ensure_includedir; then
+        report_err "mlnr 特权授权失败：/etc/sudoers 未 include ${SUDOERS_DIR}，且自动追加失败。请手动在 /etc/sudoers 加入：#includedir /etc/sudoers.d"
+        return 1
+    fi
+
+    mkdir -p "${SUDOERS_DIR}" 2>/dev/null
+    local tmp="${SUDOERS_FILE}.tmp.$$"
+    if ! sudoers_body > "${tmp}" 2>/dev/null; then
+        rm -f "${tmp}" 2>/dev/null
+        report_err "mlnr 特权授权失败：无法写入 ${SUDOERS_DIR}（请确认应用以 root 安装/启动）"
+        return 1
+    fi
+    # 语法校验，失败即放弃，避免损坏系统 sudo 配置
+    if command -v visudo >/dev/null 2>&1 && ! visudo -cf "${tmp}" >/dev/null 2>&1; then
+        rm -f "${tmp}" 2>/dev/null
+        report_err "mlnr 特权授权失败：sudoers 白名单语法校验未通过，已放弃写入 ${SUDOERS_FILE}"
+        return 1
+    fi
+    if ! install -m 0440 -o root -g root "${tmp}" "${SUDOERS_FILE}" 2>/dev/null; then
+        rm -f "${tmp}" 2>/dev/null
+        report_err "mlnr 特权授权失败：安装 ${SUDOERS_FILE} 失败（需 root:root 0440）"
+        return 1
+    fi
+    rm -f "${tmp}" 2>/dev/null
+
+    # 校验：以包用户视角查询 sudo 权限，确认 NOPASSWD 规则已生效
+    if command -v sudo >/dev/null 2>&1; then
+        local out
+        out=$(sudo -n -l -U "${APP_USER}" 2>/dev/null)
+        case "${out}" in
+            *NOPASSWD*umount*)
+                log_msg "sudoers 白名单生效（${APP_USER}）"
+                ;;
+            *)
+                report_err "mlnr 特权授权已写入 ${SUDOERS_FILE}，但未对用户 ${APP_USER} 生效。请检查文件权限（root:root 0440）与 /etc/sudoers 的 include 配置"
+                return 1
+                ;;
+        esac
+    fi
+    return 0
+}
+
+# smartctl / nvme setuid（温度采集兜底，sudo 白名单之外的备用路径）
+grant_setuid() {
+    local b p ok=0
+    for b in smartctl nvme; do
+        for p in /usr/sbin/${b} /usr/bin/${b} /sbin/${b} /bin/${b}; do
+            if [ -x "${p}" ]; then
+                if chmod u+s "${p}" 2>/dev/null; then
+                    ok=1
+                else
+                    log_msg "WARN: chmod u+s ${p} 失败（温度读取将依赖 sudo 白名单）"
+                fi
+            fi
+        done
     done
-done
+    [ "${ok}" -eq 1 ] && log_msg "smartctl/nvme setuid 已配置"
+    return 0
+}
 
-exit 0
+mlnr_grant_privileges() {
+    if [ "$(id -u)" -ne 0 ]; then
+        report_err "mlnr 特权授权失败：生命周期脚本未以 root 运行（当前 uid=$(id -u)）。请在应用中心停止并重新启动应用（config/privilege 需为 run-as=root），或手动以 root 执行：echo '${APP_USER} ALL=(root) NOPASSWD: ${ALLOW_CMDS}' > ${SUDOERS_FILE} && chmod 0440 ${SUDOERS_FILE}"
+        return 1
+    fi
+    if ! id -u "${APP_USER}" >/dev/null 2>&1; then
+        report_err "mlnr 特权授权失败：未找到包用户 ${APP_USER}（请确认 config/privilege 中 username 与安装向导一致）"
+        return 1
+    fi
+    local rc=0
+    grant_sudoers || rc=1
+    grant_setuid
+    return "${rc}"
+}
+
+mlnr_grant_privileges

@@ -148,6 +148,9 @@ func main() {
 	}
 	logger.SetLogLevel(logLevel)
 
+	// 启动自检：确认特权命令（mount/umount/hdparm）可用，提前暴露 sudoers 授权问题
+	logPrivilegeStatus()
+
 	// 初始化 WebSocket Hub
 	hub := NewHub()
 

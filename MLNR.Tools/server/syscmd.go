@@ -12,10 +12,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"mlnr/logger"
 )
 
 // findTool 探测外部命令可执行文件路径；找不到返回 ""。
@@ -55,33 +58,126 @@ func runCmd(name string, timeout time.Duration, args ...string) ([]byte, error) 
 
 // privRun 以特权执行外部命令（带超时）：
 //   - 进程为 root 时直接执行；
-//   - 非 root 时通过 `sudo -n` 提权（NOPASSWD 白名单已配置时无需交互）；
-//   - 无 sudo 或未授权时返回带修复提示的错误（如"请以 root 运行，或为运行用户配置 sudo NOPASSWD"）。
+//   - 非 root 时通过 `sudo -n` 提权（NOPASSWD 白名单由 cmd/grant_privileges 写入）；
+//   - 无 sudo 或未授权时返回带根因诊断与修复指引的错误。
 //
-// mount / umount / hdparm 等涉及挂载与硬盘电源管理的命令必须 root 权限，
-// fnOS 上上位机常以普通用户/systemd 服务运行，此时需要 sudoers 授权。
+// mount / umount / hdparm 等涉及挂载与硬盘电源管理的命令必须 root 权限。
+// fnOS 上服务进程以包用户运行（cmd/main 用 runuser 降权），因此依赖 sudoers 授权。
 func privRun(name string, timeout time.Duration, args ...string) ([]byte, error) {
 	if os.Geteuid() == 0 {
 		return runCmd(name, timeout, args...)
 	}
 	sudo := findTool("sudo")
 	if sudo == "" {
-		return nil, fmt.Errorf("需要 root 权限执行 %s（当前 uid=%d），但系统缺少 sudo 命令：请以 root 运行上位机，或安装 sudo 并为运行用户配置 NOPASSWD 白名单（见 visudo）", name, os.Geteuid())
+		return nil, fmt.Errorf("需要 root 权限执行 %s（当前用户 %s, uid=%d），但系统缺少 sudo 命令：%s",
+			name, runUserName(), os.Geteuid(), privilegeHint())
 	}
 	out, err := runCmd(sudo, timeout, append([]string{"-n", name}, args...)...)
 	if err != nil {
-		return out, fmt.Errorf("%s 需要 root 权限（当前 uid=%d），sudo -n 提权失败：%w (%s)——请以 root 运行上位机，或在 fnOS 上执行 `visudo` 为运行用户添加 NOPASSWD 白名单，例如：\n%v ALL=(root) NOPASSWD: %v, /bin/mount, /bin/umount, /usr/sbin/hdparm",
-			name, os.Geteuid(), err, strings.TrimSpace(string(out)), userOrUid(), name)
+		return out, fmt.Errorf("%s 需要 root 权限（当前用户 %s, uid=%d），sudo -n 提权失败：%w (%s)。诊断：%s。修复：%s",
+			name, runUserName(), os.Geteuid(), err, strings.TrimSpace(string(out)), sudoersProblem(), privilegeHint())
 	}
 	return out, nil
 }
 
-// userOrUid 返回当前用户名（读不到时返回 uid 字符串）。
-func userOrUid() string {
-	if u := os.Getenv("USER"); u != "" {
-		return u
+// runUserName 返回当前进程的用户名。systemd/fnOS 无登录会话运行时 $USER 常为空，
+// 因此优先用 os/user（读 /etc/passwd），避免报错提示里只能显示 uid。
+func runUserName() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	if v := os.Getenv("USER"); v != "" {
+		return v
+	}
+	if v := os.Getenv("LOGNAME"); v != "" {
+		return v
 	}
 	return strconv.Itoa(os.Geteuid())
+}
+
+// sudoersProblem 诊断本用户 sudo NOPASSWD 授权失效的具体原因，
+// 覆盖最常见的四类：sudoers.d 未被 include / 白名单文件缺失 / 文件未包含该用户 / 权限位不对。
+func sudoersProblem() string {
+	const sudoersDir = "/etc/sudoers.d"
+	uname := runUserName()
+
+	included := false
+	if b, err := os.ReadFile("/etc/sudoers"); err == nil {
+		for _, ln := range strings.Split(string(b), "\n") {
+			ln = strings.TrimSpace(ln)
+			if (strings.HasPrefix(ln, "#includedir") || strings.HasPrefix(ln, "@includedir")) &&
+				strings.Contains(ln, sudoersDir) {
+				included = true
+				break
+			}
+		}
+	}
+	if !included {
+		return "系统 /etc/sudoers 未 include " + sudoersDir + "，白名单文件不会生效"
+	}
+
+	entries, err := os.ReadDir(sudoersDir)
+	if err != nil {
+		return fmt.Sprintf("无法读取 %s（%v）", sudoersDir, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || strings.Contains(e.Name(), ".") {
+			continue
+		}
+		p := filepath.Join(sudoersDir, e.Name())
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		matched := false
+		for _, ln := range strings.Split(string(b), "\n") {
+			ln = strings.TrimSpace(ln)
+			if ln == "" || strings.HasPrefix(ln, "#") {
+				continue
+			}
+			if strings.HasPrefix(ln, uname+" ") && strings.Contains(ln, "NOPASSWD") {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		if info, statErr := os.Stat(p); statErr == nil && info.Mode().Perm() != 0o440 {
+			return fmt.Sprintf("白名单 %s 已包含用户 %s，但权限位为 0%o（必须 root:root 0440）", p, uname, info.Mode().Perm())
+		}
+		return fmt.Sprintf("白名单 %s 已包含用户 %s，但 sudo 仍拒绝（可能被系统升级/权限策略覆盖）", p, uname)
+	}
+	return fmt.Sprintf("%s 中没有授予用户 %s 的 NOPASSWD 白名单（安装/启动脚本未以 root 运行）", sudoersDir, uname)
+}
+
+// privilegeHint 返回可直接执行的修复指引。
+func privilegeHint() string {
+	uname := runUserName()
+	return fmt.Sprintf("在 fnOS 应用中心停止并重新启动本应用（启动脚本会自动重写 sudoers 白名单）；"+
+		"若仍失败，请以 root 执行：\n"+
+		"  echo '%s ALL=(root) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/bin/hdparm, /usr/bin/fuser, /usr/bin/smartctl' > /etc/sudoers.d/mlnr\n"+
+		"  chmod 0440 /etc/sudoers.d/mlnr", uname)
+}
+
+// logPrivilegeStatus 启动自检：非 root 时探测 sudo -n 是否可用，
+// 提前把权限问题写进日志（而不是等用户点"卸载"时才报错）。
+func logPrivilegeStatus() {
+	if os.Geteuid() == 0 {
+		logger.Info("syscmd", "running as root: mount/umount/hdparm execute directly")
+		return
+	}
+	sudo := findTool("sudo")
+	if sudo == "" {
+		logger.Warn("syscmd", "privileged commands unavailable: sudo not found (uid=%d). %s", os.Geteuid(), privilegeHint())
+		return
+	}
+	if _, err := runCmd(sudo, 5*time.Second, "-n", "true"); err != nil {
+		logger.Warn("syscmd", "privileged commands unavailable: sudo -n failed (%v). 诊断：%s。修复：%s",
+			err, sudoersProblem(), privilegeHint())
+		return
+	}
+	logger.Info("syscmd", "sudo -n OK: privileged disk commands (mount/umount/hdparm) available")
 }
 
 // runCmdOutput 执行外部命令（带超时），仅返回 stdout。

@@ -63,7 +63,7 @@ void loop()
   esp_task_wdt_reset(); // 喂狗
   uint32_t now = millis();
 
-  // M3: 异步执行 onConnect 中延迟的 NVS 读取（btc 回调 3KB 栈不适合执行 NVS 操作）
+  // M3: 连接后延迟加载 NVS 鉴权（onConnect 只置标志，不在 btc 回调中读 NVS）
   if(g_need_load_auth){
     g_need_load_auth = false;
     secLoadAuth();

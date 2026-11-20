@@ -54,7 +54,7 @@ void keReset()
 // 明文 HELLO 应答: ACK[0][State]，强制明文发送
 void handleHelloCmdPlain(uint8_t seq)
 {
-  const uint8_t p[2] = { BP_ERR_OK, (uint8_t)((g_dev_state == STATE_UNINIT) ? 0 : 1) };
+  const uint8_t p[2] = { BP_ERR_OK, (uint8_t)g_dev_state };
   sendReplyFramePlain(seq, BP_RESP_ACK, p, sizeof(p));
 }
 

@@ -519,6 +519,16 @@ type BLEManager struct {
 	// 设备解密失败计数（连续 3 次降级为明文会话）
 	decryptFailCount int
 
+	// 短帧计数：HasKey 状态下收到 <28B 的 notify（固件"已初始化但无会话密钥"矛盾态的直接证据）
+	shortFrameCount int
+
+	// 连续多少次连接以"短帧 + 握手失败"告终。单次可能是偶发抖动，
+	// 连续 2 次才判定为固件矛盾态并触发自动重启（跨连接累计，不在 disconnect 里清零）。
+	shortFrameStreak int
+
+	// 最近一次自动重启（进程原地重建）的时间，用于冷却
+	lastSelfRestart time.Time
+
 	// 通信失败计数（断线检测）：写特征值失败时递增，连续 ≥3 次触发 markDisconnected
 	commFailCount int
 
@@ -1072,6 +1082,11 @@ func (m *BLEManager) Connect() error {
 	// 连接成功，先置 Connected 并切换到当前设备 MAC 隔离配置
 	m.setState(StateConnected)
 
+	// 每次新建连接都重置短帧计数：判定只针对本次连接
+	m.mu.Lock()
+	m.shortFrameCount = 0
+	m.mu.Unlock()
+
 	// Phase 4.1：切换到当前设备 MAC 隔离配置（持久化旧 MAC → 加载新 MAC）
 	if m.store != nil {
 		m.store.SwitchDeviceMAC(m.GetDeviceInfo().Address)
@@ -1092,11 +1107,51 @@ func (m *BLEManager) Connect() error {
 	// 握手成功前不发送任何加密业务指令（无会话密钥时 sendBinaryCommand 必然失败）
 	if err := m.InitiateHandshake(); err != nil {
 		logger.Warn("ble", "auto handshake failed: %v", err)
+		// 判定本次失败是否为本故障的典型签名：固件自称已初始化，却用明文短帧回应加密指令
+		// （即"内存无会话密钥但 g_dev_state 仍为 WORK_WAIT"）。主机侧协议层无法把它拉回 UNINIT，
+		// 现场唯一验证有效的恢复手段是"完全重启软件"——这里自动执行同一动作（断开 + 等待
+		// 固件处理 onDisconnect + 进程原地重建），口令为进程自重启，PID 不变。
+		m.mu.Lock()
+		shortFrames := m.shortFrameCount
+		m.mu.Unlock()
+		if shortFrames > 0 {
+			// 单次短帧可能只是偶发链路/时序问题，先干净重连一次；
+			// 连续 2 次同一签名才判定为"固件已初始化但无会话密钥"的矛盾态。
+			m.mu.Lock()
+			m.shortFrameStreak++
+			streak := m.shortFrameStreak
+			m.mu.Unlock()
+			if streak >= 2 {
+				m.mu.Lock()
+				m.shortFrameStreak = 0
+				m.mu.Unlock()
+				m.disconnect()
+				m.requestSelfRestart(fmt.Sprintf("连续 %d 次连接均为「短帧 + 握手失败」（固件疑似已初始化但无会话密钥）", streak))
+				return fmt.Errorf("握手失败: %w", err)
+			}
+			logger.Warn("ble", "本次连接握手失败且收到 %d 个明文短帧（连续 2 次将自动重启进程），先干净重连", shortFrames)
+			m.disconnect()
+			return fmt.Errorf("握手失败: %w", err)
+		}
+
+		m.mu.Lock()
+		m.shortFrameStreak = 0
+		m.mu.Unlock()
+		// 非短帧类失败（密钥失配/指令超时等）：限频给出可操作提示，避免重连循环刷屏
+		logger.WarnRateLimited("ble", "fw-key-mismatch", 10*time.Minute,
+			"BLE 握手失败（固件密钥失配/状态异常）：请断电重启设备，并在上电瞬间同时按住 BTN1+BTN3 保持 5 秒恢复出厂，之后重新初始化")
 		// 握手失败视为连接不可用：断开 BLE 链路并回滚状态，
 		// 避免 API 返回 200 但设备实际不可用、心跳持续刷 Warn
 		m.disconnect()
 		return fmt.Errorf("握手失败: %w", err)
 	}
+
+	// 握手恢复，说明之前的会话异常已消除：清空自重启记录与短帧连续计数，
+	// 允许后续再次自动恢复
+	m.mu.Lock()
+	m.shortFrameStreak = 0
+	m.mu.Unlock()
+	resetSelfRestartGuard()
 
 	// 握手成功后读取固件离线事件（离线期间 SWn 变化，反推真实时间写操作日志）
 	go m.readOfflineEvents()
@@ -1523,6 +1578,7 @@ func (m *BLEManager) clearStatesLocked() {
 	}
 	m.lastSensorPush = time.Time{}
 	m.decryptFailCount = 0
+	m.shortFrameCount = 0
 	m.deviceInfo.SessionType = SessionPlain
 	m.deviceInfo.RunState = RunStateUnknown
 	m.deviceInfo.Version = ""
@@ -1557,31 +1613,34 @@ func (m *BLEManager) InitiateHandshake() error {
 	logger.Debug("ble", "handshake: HELLO ok, device state=%d addr=%s", devState, addr)
 
 	if devState != 0 {
-		// ============ 已初始化设备：装载本地会话密钥，加密 PING 验证 ============
+		// 已初始化设备：装载本地会话密钥，加密 PING 验证。
+		// 验证失败（固件内存会话丢失 / 固件降级明文但 NVS 仍标已初始化 / 密钥不一致）时
+		// 不回退断开，而是清除内存密钥并回退走下方 RSA 密钥分发重新协商（自愈），
+		// 避免"连接→解密失败→降级明文→握手超时→断开→重连"死循环。
+		// 日志特征：decrypt notify failed: 加密帧长度不足 → 加密会话验证失败: 指令超时（3s）。
 		key := m.getDeviceKey(addr)
-		if len(key) != AESKeyLen {
-			return fmt.Errorf("本地无 %s 的会话密钥（固件已初始化），请重置固件后重新初始化", strings.ToUpper(addr))
+		if len(key) == AESKeyLen {
+			if err := m.sec.SetKey(key); err == nil {
+				pingPayload, pingErr, err := m.sendBinaryCommand(bpCmdPing, nil)
+				if err == nil && pingErr == bpErrOK {
+					// P7：验证通过后才置 Encrypted，失败时保持 Plain 不会误导状态展示
+					m.setSessionType(SessionEncrypted)
+					// 顺带解析固件 PING 应答的信号质量（连接早期即展示）
+					m.applyPingQuality(pingPayload)
+					m.setRunState(RunStateWorkRun)
+					logger.Info("ble", "device already initialized, encrypted session verified (WORK_RUN)")
+					return nil
+				}
+				logger.Warn("ble", "已初始化设备的会话验证失败（err=%v code=%s），回退重新密钥交换自愈", err, bpErrText(pingErr))
+			}
+		} else {
+			logger.Warn("ble", "本地无 %s 的会话密钥（固件声称已初始化），回退重新密钥交换", strings.ToUpper(addr))
 		}
-		if err := m.sec.SetKey(key); err != nil {
-			return fmt.Errorf("装载会话密钥失败: %w", err)
-		}
-		pingPayload, pingErr, err := m.sendBinaryCommand(bpCmdPing, nil)
-		if err != nil {
-			return fmt.Errorf("加密会话验证失败: %w", err)
-		}
-		if pingErr != bpErrOK {
-			return fmt.Errorf("会话密钥不匹配（%s），固件可能已被重置，请重置后重新初始化", bpErrText(pingErr))
-		}
-		// P7：验证通过后才置 Encrypted，失败时保持 Plain 不会误导状态展示
-		m.setSessionType(SessionEncrypted)
-		// 顺带解析固件 PING 应答的信号质量（连接早期即展示）
-		m.applyPingQuality(pingPayload)
-		m.setRunState(RunStateWorkRun)
-		logger.Info("ble", "device already initialized, encrypted session verified (WORK_RUN)")
-		return nil
+		// 清除内存密钥，进入明文密钥分发；固件 KE_CONFIRM 处理中会覆盖双方持久化密钥
+		m.sec.ClearKey()
 	}
 
-	// ============ UNINIT 设备：RSA-OAEP 密钥分发 ============
+	// ============ UNINIT 设备 / 已初始化但验证失败回退：RSA-OAEP 密钥分发 ============
 	// 1) 生成 RSA-2048 密钥对，保留私钥、只发公钥(DER)
 	priv, pubDER, err := GenerateRSAKeyPair()
 	if err != nil {
@@ -1810,6 +1869,25 @@ func (m *BLEManager) handleNotify(data []byte) {
 
 	// 会话密钥方案：有密钥 → 加密解析；无密钥 → 明文阶段（密钥交换：HELLO ACK / PUBKEY ACK / EVT_KE_CT）
 	if m.sec.HasKey() {
+		// 本协议加密帧最小长度 = IV(12) + TAG(16) = 28B。
+		// 低于该长度只可能是固件按明文发送的短帧（SEC_REQUIRED/DECRYPT_FAIL，8~10B），
+		// 说明固件正处于"上报已初始化、但内存里没有会话密钥"的矛盾态。
+		// 这是固件状态异常，不能计入"连续 3 次解密失败"——否则会被误判成主机密钥失效，
+		// 用"降级明文会话"掩盖真实原因，并让 UI 长期显示"未初始化"。
+		if len(data) < 28 {
+			logger.WarnRateLimited("ble", "short-notify", 30*time.Second,
+				"收到 %dB 疑似明文短帧（加密帧最小 28B）：固件可能处于\"已初始化但无会话密钥\"状态", len(data))
+			m.mu.Lock()
+			m.shortFrameCount++
+			n := m.shortFrameCount
+			m.mu.Unlock()
+			if n >= 2 {
+				// 同一连接内连续短帧：链路/固件状态已不可用，干净断开并交给重连 watcher（带退避），
+				// 不再原地重试空转、也不 3s 一次地刷解密失败日志。
+				go m.markDisconnected()
+			}
+			return
+		}
 		plain, err := m.sec.Decrypt(data)
 		if err != nil {
 			logger.Warn("ble", "decrypt notify failed: %v", err)
@@ -3095,6 +3173,7 @@ func (m *BLEManager) startReconnect() {
 		// 给首次尝试留一点缓冲（避免 Connect() 自身的 5 次重试还在进行中）
 		startedAt := time.Now()
 		time.Sleep(1 * time.Second)
+		failStreak := 0 // 连续重连失败次数（退避用，成功一次即复位）
 		for {
 			select {
 			case <-stop:
@@ -3107,7 +3186,10 @@ func (m *BLEManager) startReconnect() {
 					target := s.LastAddress
 					logger.Info("ble", "auto reconnecting to %s", target)
 					if err := m.Connect(); err != nil {
+						failStreak++
 						logger.Debug("ble", "reconnect attempt failed: %v", err)
+					} else {
+						failStreak = 0
 					}
 				} else {
 					logger.Debug("ble", "reconnect watcher: disconnected but no auto-connect config (AutoConnect=%v LastAddress=%q), sleeping", s.AutoConnect, s.LastAddress)
@@ -3116,12 +3198,33 @@ func (m *BLEManager) startReconnect() {
 				logger.Debug("ble", "reconnect watcher: state=%s, skipping", m.GetState())
 			}
 
-			// 重试间隔：开机阶段（前 3 分钟）快速重试 5s，稳定后 15s
+			// 重试间隔：开机阶段（前 3 分钟）快速重试 5s，稳定后 15s；
+			// 连续失败时按 5s→10s→20s→30s 退避（封顶 30s），成功一次即复位。
+			// 单次瞬时握手失败不应演变成高频重连抖动——抖动会放大固件侧连接/断开
+			// 事件错序的窗口（表现为设备端"已初始化但无会话密钥"的矛盾态）。
 			var interval time.Duration
 			if time.Since(startedAt) < 3*time.Minute {
 				interval = 5 * time.Second
 			} else {
 				interval = 15 * time.Second
+			}
+			if failStreak > 1 {
+				n := failStreak - 1
+				if n > 3 {
+					n = 3
+				}
+				interval *= time.Duration(1 << uint(n))
+				if interval > 30*time.Second {
+					interval = 30 * time.Second
+				}
+			}
+			// 连续 6 次仍失败：固件会话状态异常（典型为"上报已初始化但内存无会话密钥"），
+			// 此时高频重连只会加剧销毁/重建抖动并刷日志 → 拉长到 60s，并给一次性可操作提示。
+			if failStreak >= 6 {
+				interval = 60 * time.Second
+				if failStreak == 6 {
+					logger.Warn("ble", "连续 6 次握手失败：疑似固件会话状态异常，建议断电重启设备，并在上电瞬间同时按住 BTN1+BTN3 保持 5 秒恢复出厂")
+				}
 			}
 			select {
 			case <-stop:

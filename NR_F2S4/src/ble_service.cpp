@@ -324,8 +324,12 @@ static void secTask(void* arg)
     size_t ptLen = 0;
     const uint8_t* frame; size_t frameLen;
     if(secSessionEnabled()){
-      if(!secDecrypt(buf, len, pt, sizeof(pt), &ptLen)){
-        // 解密失败: 兜底尝试明文 HELLO（上位机在无本地密钥时以明文探测设备状态）
+      if(secDecrypt(buf, len, pt, sizeof(pt), &ptLen)){
+        // M4: 解密成功证明双方密钥一致，授权该连接
+        ble_authorized = true;
+        frame = pt; frameLen = ptLen;
+      }else{
+        // 解密失败: 兜底尝试明文 HELLO（上位机探测未初始化设备）
         uint8_t s2 = 0, c2 = 0, pl2 = 0;
         const uint8_t* p2 = nullptr;
         if(bpParseFrame(buf, len, &s2, &c2, &p2, &pl2) && c2 == BP_CMD_HELLO){
@@ -335,7 +339,7 @@ static void secTask(void* arg)
           bleCommUnlock();
           continue;
         }
-        // 真解密失败: 回复 DECRYPT FAIL 错误帧
+        // 真解密失败: 回复 DECRYPT FAIL 错误帧（seq=0 事件语义）
         const uint8_t e[1] = { BP_ERR_DECRYPT_FAIL };
         sendReplyFrame(0, BP_RESP_ACK, e, 1);
         // 链路质量: 记一帧异常（链路干扰/帧损坏）
@@ -343,15 +347,12 @@ static void secTask(void* arg)
         bleCommUnlock();
         continue;
       }
-      // M4: 解密成功证明双方密钥一致，授权该连接
-      ble_authorized = true;
-      frame = pt; frameLen = ptLen;
     }else{
       // 无会话密钥：仅 UNINIT 状态允许明文帧（密钥交换阶段）
       // S8: WORK_WAIT 下 secSessionEnabled=false 属重连竞态窗口（onConnect 置
-      // g_need_load_auth 后 loop 尚未执行 secLoadAuth）或 NVS 密钥损坏态，
+      // g_need_load_auth 后尚未执行 secLoadAuth）或 NVS 密钥损坏态，
       // 若走明文分支则任意邻近攻击者可绕过加密直接执行 SPD/SW/CFG/RESET。
-      // 此窗口仅放行明文 HELLO（上位机探测状态），其余回 SEC_REQUIRED。
+      // 此窗口仅放行明文 HELLO，其余回 SEC_REQUIRED。
       if(g_dev_state != STATE_UNINIT){
         uint8_t s2 = 0, c2 = 0, pl2 = 0;
         const uint8_t* p2 = nullptr;
@@ -359,10 +360,11 @@ static void secTask(void* arg)
           lqNoteFrame(s2, true);
           if(g_debug_mode) Serial.printf("[SEC] plain HELLO (key not loaded) seq=%u\n", s2);
           handleHelloCmdPlain(s2);
-        }else{
-          const uint8_t e[1] = { BP_ERR_SEC_REQUIRED };
-          sendReplyFrame(0, BP_RESP_ACK, e, 1);
+          bleCommUnlock();
+          continue;
         }
+        const uint8_t e[1] = { BP_ERR_SEC_REQUIRED };
+        sendReplyFrame(0, BP_RESP_ACK, e, 1);
         bleCommUnlock();
         continue;
       }
